@@ -1,0 +1,46 @@
+[project]
+name = "prolific-interview"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "httpx>=0.27.2",
+    "jupyter>=1.1.1",
+    "langchain>=0.3.27",
+    "langchain-openai>=0.3.35",
+    "langgraph>=0.6.10",
+    "langgraph-checkpoint>=2.0.0,<3.0.0",
+    "langgraph-checkpoint-postgres>=2.0.0,<3.0.0",
+    "notebook>=7.4.7",
+    "numpy>=1.26.0",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.6.1",
+    "pytest>=8.1.0",
+    "python-dotenv>=1.0.1",
+    "sqlalchemy>=2.0.36",
+    "psycopg[binary]>=3.2.3",
+    "streamlit>=1.38.0",
+    "sse-starlette>=2.1.2",
+    "uvicorn[standard]>=0.30.6",
+    "pre-commit>=4.3.0",
+]
+
+[tool.ruff]
+exclude = [
+    ".venv/",
+    "env/",
+    "venv/",
+    "node_modules/",
+    "docs/",
+    "notebooks/",
+    "docker/",
+    "infra/",
+    "build/",
+    "dist/",
+    "data/",
+]
+
+[tool.ruff.lint]
+ignore = ["E501"]

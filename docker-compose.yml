@@ -1,0 +1,43 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: prolific-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: prolific
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  agent-service:
+    build:
+      context: .
+      dockerfile: docker/agent.Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/prolific
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      API_KEY: ${API_KEY:-}
+      AGENT_SERVICE_URL: http://agent-service:8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+
+  streamlit:
+    build:
+      context: .
+      dockerfile: docker/streamlit.Dockerfile
+    environment:
+      AGENT_SERVICE_URL: http://agent-service:8080
+    ports:
+      - "8501:8501"
+    depends_on:
+      - agent-service
+
+volumes:
+  postgres_data:
