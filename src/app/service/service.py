@@ -21,7 +21,14 @@ from app.service.utils.profile import (
 )
 
 from ..core.config import get_settings
-from ..schema.models import InterviewState, InvokeRequest, InvokeResponse
+from ..core.llm import get_llm
+from ..schema.models import (
+    InterviewState,
+    InvokeRequest,
+    InvokeResponse,
+    SimulateAnswerRequest,
+    SimulateAnswerResponse,
+)
 from ..storage.store import load_state, save_state
 
 settings = get_settings()
@@ -268,3 +275,53 @@ async def resume(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+DEFAULT_SIM_PERSONA = (
+    "You are a cooperative candidate who answers honestly, highlighting strengths "
+    "without bluffing. Provide 4-6 sentences with practical detail."
+)
+
+
+@app.post("/simulation/answer", response_model=SimulateAnswerResponse)
+async def simulation_answer(
+    request: SimulateAnswerRequest,
+    x_api_key: str | None = Header(default=None),
+) -> SimulateAnswerResponse:
+    """Generate a mock candidate answer using the backend's LLM."""
+
+    verify_api_key(x_api_key)
+
+    persona = request.persona.strip() if request.persona else DEFAULT_SIM_PERSONA
+    history_block = "\n".join(request.history) if request.history else ""
+    prompt_parts = [
+        persona,
+        f"Skill: {request.skill}",
+        f"Question: {request.question}",
+    ]
+    if history_block:
+        prompt_parts.append("Recent context:")
+        prompt_parts.append(history_block)
+    prompt_parts.append(
+        "Answer the question in 4-6 sentences. Be specific, mention trade-offs, "
+        "and acknowledge uncertainty if you are unsure."
+    )
+    prompt = "\n".join(prompt_parts)
+
+    llm = get_llm(temperature=0.4)
+    try:
+        message = await llm.ainvoke(prompt)
+        answer = getattr(message, "content", str(message)).strip()
+    except Exception:
+        answer = (
+            "I would outline the key steps, explain the reasoning behind them, and "
+            "note any risks or assumptions before proceeding. (simulated fallback)"
+        )
+
+    if not answer:
+        answer = (
+            "I would start by explaining the core approach and highlight where I "
+            "need clarification before moving forward. (simulated fallback)"
+        )
+
+    return SimulateAnswerResponse(answer=answer)

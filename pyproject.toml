@@ -25,6 +25,8 @@ dependencies = [
     "sse-starlette>=2.1.2",
     "uvicorn[standard]>=0.30.6",
     "pre-commit>=4.3.0",
+    "pandas>=2.3.3",
+    "matplotlib>=3.10.7",
 ]
 
 [tool.ruff]

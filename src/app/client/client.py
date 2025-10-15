@@ -121,3 +121,14 @@ class AgentClient:
                             data_parts = []
         except httpx.RemoteProtocolError:
             yield {"event": "done", "data": '{"error":"remote_protocol_error"}'}
+
+    def simulate_answer(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        headers = self._headers()
+        with httpx.Client(timeout=60) as client:
+            r = client.post(
+                f"{self.base_url}/simulation/answer",
+                json=payload,
+                headers=headers,
+            )
+            r.raise_for_status()
+            return r.json()

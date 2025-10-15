@@ -8,11 +8,18 @@ QUESTION_PROMPT = ChatPromptTemplate.from_template(
     Previous question: {previous_question}
     Previous answer summary: {previous_answer}
     Grader reasoning: {previous_reasoning}
+    Recent turn history for this skill:
+    {recent_history}
 
     Evidence from candidate profile:
     {evidence_spans}
 
-    Produce a single concise question that can be answered in under two minutes,
-    probing practical expertise. Avoid multiple sub-questions. Return only the question text.
+    Based on the candidate's previous answer and reasoning, ask a natural follow-up question that builds on their response.
+    The question should feel like a friendly conversation while still probing their practical expertise in {skill}.
+    Keep it concise and focused - it should be answerable in under 2 minutes.
+
+    If there is no previous question/answer, ask an initial question that matches their apparent skill level.
+
+    Return only the question text.
     """
 )

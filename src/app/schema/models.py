@@ -35,6 +35,7 @@ class InterviewState(TypedDict):
     verified_skills: List[str]
     logs: List[str]
     skill_summaries: List[Dict[str, object]]
+    question_history: List[Dict[str, object]]
 
 
 class InvokeRequest(BaseModel):
@@ -49,3 +50,20 @@ class InvokeRequest(BaseModel):
 
 class InvokeResponse(BaseModel):
     state: Dict[str, Any]
+
+
+class SimulateAnswerRequest(BaseModel):
+    question: str = Field(min_length=5)
+    skill: str = Field(min_length=1)
+    persona: Optional[str] = Field(
+        default=None,
+        description="Optional persona or tone instructions for the simulated candidate.",
+    )
+    history: List[str] = Field(
+        default_factory=list,
+        description="Recent conversation snippets to preserve context.",
+    )
+
+
+class SimulateAnswerResponse(BaseModel):
+    answer: str = Field(min_length=1)

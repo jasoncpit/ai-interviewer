@@ -5,7 +5,11 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from app.agents.interviewer.prompts.generate import QUESTION_PROMPT
-from app.agents.interviewer.utils.state import append_log, record_question
+from app.agents.interviewer.utils.state import (
+    append_log,
+    history_snippet,
+    record_question,
+)
 from app.agents.interviewer.utils.stats import select_skill_ucb_with_log
 from app.core.llm import get_llm
 from app.schema.models import InterviewState, Question
@@ -40,6 +44,7 @@ async def _draft_follow_up(
     previous_question: str,
     previous_answer: str,
     previous_reasoning: str,
+    history_snippet: str,
 ) -> Question:
     """Ask the LLM for the next best follow-up question."""
     question = await structured_llm.ainvoke(
@@ -51,6 +56,7 @@ async def _draft_follow_up(
             previous_question=previous_question,
             previous_answer=previous_answer,
             previous_reasoning=previous_reasoning,
+            recent_history=history_snippet,
         )
     )
     if getattr(question, "skill", None) != skill:
@@ -71,11 +77,14 @@ async def select_question_node(state: InterviewState) -> InterviewState:
     )
     # Prefer selecting among active skills only
     inactive = set(state.get("inactive_skills", []))
+    verified = set(state.get("verified_skills", []))
     active_beliefs = {
-        k: v for k, v in state.get("belief_state", {}).items() if k not in inactive
+        k: v
+        for k, v in state.get("belief_state", {}).items()
+        if k not in inactive and k not in verified
     }
     pool = active_beliefs if active_beliefs else state.get("belief_state", {})
-    skill, logs = select_skill_ucb_with_log(pool, state["turn"], state["ucb_C"])
+    skill, logs = select_skill_ucb_with_log(pool, state["ucb_C"])
     for entry in logs:
         append_log(state, f"select_ucb → {entry}")
 
@@ -104,6 +113,7 @@ async def select_question_node(state: InterviewState) -> InterviewState:
             else ""
         )
         prev_ans = state.get("last_answer") or ""
+        history_ctx = history_snippet(state, skill)
         candidate = await _draft_follow_up(
             structured_llm,
             skill,
@@ -113,6 +123,7 @@ async def select_question_node(state: InterviewState) -> InterviewState:
             previous_question=prev_q,
             previous_answer=prev_ans,
             previous_reasoning=prev_reason,
+            history_snippet=history_ctx,
         )
 
     record_question(state, candidate, "select_question")
