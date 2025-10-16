@@ -7,7 +7,7 @@ LangGraph-powered interviewing assistant that verifies a candidate’s claimed s
 
 The AI interviewer pipleine is quite complex, but let's me take a step back and think what the company is asking for at its core, ground this in a simpler business context:
 
--Why it matters: The company’s value depends on a trusted pool of verified participants for AI evaluation. If we can’t trust their claimed skills, every downstream dataset and model evaluation becomes unreliable.
+- Why it matters: The company’s value depends on a trusted pool of verified participants for AI evaluation. If we can’t trust their claimed skills, every downstream dataset and model evaluation becomes unreliable.
 
 - The problem: Participants self-report expertise (“Python expert,” “data scientist,” etc.), but manual vetting doesn’t scale and is prone to bias. We need a systematic, scalable way to algorithmically verify human expertise—accurately, quickly, and at low cost.
 
@@ -199,6 +199,17 @@ flowchart TD
 - **Dynamic difficulty**: `select_question_node` in `src/app/agents/interviewer/nodes/select.py` nudges question difficulty up after high scores (≥4) and down after weak answers (≤2), ensuring the UCB policy probes depth appropriately.
 - **Lower Confidence Bound (LCB)**: `compute_uncertainty` in `src/app/agents/interviewer/utils/stats.py` combines the running mean and variance to produce `LCB = mean - z * standard_error`. The z-score comes from the request payload so the service can tune strictness per interview, and a prior pseudo-count keeps early confidence intervals honest.
 - **Verification rule**: `update_node` in `src/app/agents/interviewer/nodes/update.py` declares a skill verified only when two conditions hold: the agent has asked at least `min_questions_per_skill` and the computed LCB clears the `verification_threshold`. Failing scores push the skill into an inactive pool so UCB stops sampling it, prompting `decide_node` to wrap up if no active skills remain.
+
+
+## Grader Rubric and Scoring System
+
+The grader converts free-form answers into structured aspect scores and a final 1–5 rating.
+
+- Prompt and JSON: `src/app/agents/interviewer/prompts/grade.py` asks a examiner to score four aspects — coverage, technical_depth, evidence, communication — and return strict JSON with short overall reasoning and a `factual_error` flag. The prompt never computes the final score.
+- Scoring logic: `src/app/agents/interviewer/nodes/grade.py` calls the LLM with structured output, applies a factual-error override (sets all aspects to 1 and forces final score 1), then computes the final score via weighted average with half-up rounding and bounds:
+  - Weights: coverage 1.0, technical_depth 1.2, evidence 1.0, communication 0.6
+  - Range: clamp to 1–5
+- State effects: Writes `Grade(score, reasoning, aspects)` to the `InterviewState`, clears `pending_answer`, and logs per-aspect scores for auditability.
 
 ### Deployment → FastAPI → Fargate
 ```mermaid

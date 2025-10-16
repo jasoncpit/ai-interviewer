@@ -43,7 +43,7 @@ def _compute_final_score(
         aspects.get(aspect, AspectBreakdown(score=1, notes="")).score <= 2
         for aspect in _ASPECTS_ORDER
     ):
-        final_score = min(final_score, 2)
+        final_score = min(final_score, 1)
 
     return final_score
 
