@@ -3,11 +3,11 @@ from __future__ import annotations
 import math
 from typing import Dict, List, Literal, Tuple
 
-PRIOR_MEAN = 2.5
+PRIOR_MEAN = 3
 PRIOR_VARIANCE = 1  # prior belief about variance on 1–5 rubric
 PRIOR_STRENGTH = 1  # pseudo-samples injected as a prior
-SE_FLOOR = 0.15  # guardrail for tiny sample sizes
-SE_FLOOR_MIN_REAL = 2  # keep the guardrail until we have this many real samples
+SE_FLOOR = 0.1  # guardrail for tiny sample sizes
+SE_FLOOR_MIN_REAL = 1  # keep the guardrail until we have this many real samples
 
 
 def ensure_prior(belief: Dict) -> None:

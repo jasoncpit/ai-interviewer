@@ -4,6 +4,22 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC_DIR="$ROOT_DIR/src"
 
+# Load optional .env file so OPENAI_API_KEY and other settings are available
+if [[ -f "$ROOT_DIR/.env" ]]; then
+  # shellcheck disable=SC2046
+  set -a
+  source "$ROOT_DIR/.env"
+  set +a
+fi
+
+if [[ -z "${OPENAI_API_KEY:-${openai_api_key:-}}" ]]; then
+  cat <<'EOF'
+Warning: OPENAI_API_KEY is not set. The interviewer service requires an OpenAI key.
+Add it to .env or export OPENAI_API_KEY before running this script.
+EOF
+  sleep 1
+fi
+
 # Provide DB-less defaults for local development
 export DATABASE_URL="sqlite:///$SRC_DIR/prolific_local.db"
 export AGENT_SERVICE_URL="http://127.0.0.1:8080"

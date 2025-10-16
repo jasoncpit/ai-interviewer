@@ -27,7 +27,7 @@ prolific_interview/
 │       ├── core/                  # Settings + LLM factory
 │       ├── schema/models.py       # Pydantic models / InterviewState typing
 │       └── client/client.py       # Thin HTTP + SSE client
-├── tests/                         # Pytest suite with service, node, and UI tests
+├── test/                          # Pytest suite with service and policy tests
 ├── Makefile                       # Developer shortcuts (lint, test, run)
 └── pyproject.toml                 # Project metadata and dependencies
 ```
@@ -50,31 +50,11 @@ prolific_interview/
 - **Lower Confidence Bound (LCB)**: `compute_uncertainty` in `src/app/agents/interviewer/utils/stats.py` combines the running mean and variance to produce `LCB = mean - z * standard_error`. The z-score comes from the request payload so the service can tune strictness per interview, and a prior pseudo-count keeps early confidence intervals honest.
 - **Verification rule**: `update_node` in `src/app/agents/interviewer/nodes/update.py` declares a skill verified only when two conditions hold: the agent has asked at least `min_questions_per_skill` and the computed LCB clears the `verification_threshold`. Failing scores push the skill into an inactive pool so UCB stops sampling it, prompting `decide_node` to wrap up if no active skills remain.
 
-## Setup
-1. **Dependencies**: the project uses [uv](https://github.com/astral-sh/uv) to install and run tools. Install it once, then run `uv sync` from the repo root to create a Python 3.11 environment.
-2. **Environment**: supply an OpenAI key via `.env` or the shell. At minimum set:
-   ```bash
-   export OPENAI_API_KEY=sk-your-key
-   ```
-   The FastAPI service reads the value through `app.core.config.Settings`.
+## To do
 
-## Local Development
-- Start both the FastAPI service and the Streamlit console with:
-  ```bash
-  ./scripts/local-test.sh
-  ```
-  This launches `uvicorn` on `localhost:8080` and Streamlit on `localhost:8501`.
-- To run just the API:
-  ```bash
-  PYTHONPATH=src uv run --python 3.11 uvicorn app.service.service:app --reload
-  ```
-- To run only the UI:
-  ```bash
-  streamlit run src/streamlit_app.py
-  ```
-
-## Tests
-All test cases live under `tests/` and cover the LangGraph nodes, configuration helpers, statistics utilities, and Streamlit bootstrapping.
-```bash
-PYTHONPATH=src uv run --python 3.11 pytest -q
-```
+- [] Setup LangSmith for monitoring and debugging
+- [] Polish notes and notebook for better documentation
+- [] Add more tests for the llm and FastAPI service
+- [] Add architecture diagrams
+- [] Add LangGraph orchestration charts
+- [] A section on UCB and LCB for the selector node

@@ -22,6 +22,8 @@ def init_session_state():
         st.session_state["verified_skills"] = []
     if "agent_logs" not in st.session_state:
         st.session_state["agent_logs"] = []
+    if "session_started" not in st.session_state:
+        st.session_state["session_started"] = False
 
 
 def handle_stream_event(event: str, data: str, log=None) -> Optional[str]:
@@ -75,13 +77,16 @@ def handle_done_event(payload: Optional[dict]) -> str:
 
     if payload.get("error") == "remote_protocol_error":
         st.warning("Stream ended unexpectedly. Please try again.")
+        st.session_state["session_started"] = False
         return "done"
 
     if payload.get("status") == "awaiting_answer":
         st.session_state["awaiting_answer"] = True
+        st.session_state["session_started"] = True
         return "interrupt"
 
     st.session_state["awaiting_answer"] = False
+    st.session_state["session_started"] = False
     st.session_state["skill_summaries"] = payload.get("skill_summaries", [])
     st.session_state["verified_skills"] = payload.get("verified", [])
     if payload:
@@ -173,7 +178,7 @@ with st.sidebar:
         "Z value",
         min_value=0.0,
         max_value=5.0,
-        value=1.96,
+        value=1.69,
         step=0.01,
         help="Z-score used for confidence intervals when estimating skill proficiency.",
     )
@@ -181,7 +186,7 @@ with st.sidebar:
         "UCB C",
         min_value=0.0,
         max_value=5.0,
-        value=1.0,
+        value=2.0,
         step=0.1,
         help="Exploration coefficient for UCB selection (higher explores more).",
     )
@@ -206,6 +211,7 @@ with st.sidebar:
             st.session_state["chat"] = []
             st.session_state.pop("awaiting_answer", None)
             st.session_state.pop("current_question", None)
+            st.session_state["session_started"] = False
             st.rerun()
     with c2:
         if st.button(
@@ -399,34 +405,50 @@ if (
     except Exception:
         st.session_state["auto_resumed"] = True
 
-# Main interface
-if st.button("Start Interview"):
-    client = AgentClient(base_url=base_url)
-    payload = dict(base_payload)
-    session_id = st.session_state.get("session_id") or f"session-{uuid.uuid4()}"
-    st.session_state["session_id"] = session_id
+chat_history = st.session_state.get("chat", [])
+if chat_history:
+    st.divider()
+    for entry in chat_history:
+        role = entry.get("role", "assistant")
+        content = entry.get("content", "")
+        if not content:
+            continue
+        with st.chat_message(role):
+            st.markdown(content)
 
-    try:
-        for evt in client.stream(payload, session_id=session_id):
-            signal = handle_stream_event(evt.get("event"), evt.get("data"))
-            if signal in {"interrupt", "done"}:
-                break
-    except Exception:
-        st.error("Streaming error. Please check the service and try again.")
-    st.rerun()
+show_start_button = not st.session_state.get("session_started")
+if show_start_button:
+    if st.button(
+        "Start Interview",
+        disabled=bool(st.session_state.get("awaiting_answer")),
+        type="primary",
+    ):
+        st.session_state["session_started"] = True
+        client = AgentClient(base_url=base_url)
+        payload = dict(base_payload)
+        session_id = st.session_state.get("session_id") or f"session-{uuid.uuid4()}"
+        st.session_state["session_id"] = session_id
+
+        try:
+            for evt in client.stream(payload, session_id=session_id):
+                signal = handle_stream_event(evt.get("event"), evt.get("data"))
+                if signal in {"interrupt", "done"}:
+                    break
+        except Exception:
+            st.error("Streaming error. Please check the service and try again.")
+        st.rerun()
+else:
+    st.caption("Interview in progress. Respond to the current question or use the sidebar to resume/end.")
 
 # Handle answer input
 if st.session_state.get("awaiting_answer"):
     st.divider()
-    cols = st.columns([3, 1])
-    with cols[0]:
-        answer = st.chat_input("Your answer")
-    with cols[1]:
-        simulate = st.checkbox(
-            "Simulate answer",
-            value=False,
-            help="When checked, the app will auto-generate an answer using the backend and submit it.",
-        )
+    answer = st.chat_input("Your answer")
+    simulate = st.checkbox(
+        "Simulate answer",
+        value=False,
+        help="When checked, the app will auto-generate an answer using the backend and submit it.",
+    )
     if answer:
         st.session_state["chat"].append({"role": "user", "content": answer})
         client = AgentClient(base_url=base_url)
