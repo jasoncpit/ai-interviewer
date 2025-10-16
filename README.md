@@ -59,11 +59,7 @@ This setup naturally encodes the exploration–exploitation tradeoff:
 ## File Structure
 ```text
 prolific_interview/
-├── app/main.py                    # CLI placeholder
 ├── docker/                        # Container builds for agent + dependencies
-├── docs/                          # Architecture notes and diagrams
-├── infra/                         # AWS CDK stacks for ECR, IAM, ECS helpers
-├── notebooks/                     # Bandit experiments and simulations
 ├── scripts/                       # Operational scripts (deploy, lint)
 ├── src/
 │   ├── streamlit_app.py           # Operator-facing dashboard (Streamlit)
@@ -79,6 +75,22 @@ prolific_interview/
 └── pyproject.toml                 # Project metadata and dependencies
 ```
 
+
+
+## LangGraph Orchestration
+```mermaid
+stateDiagram-v2
+    [*] --> generate
+    generate --> select
+    select --> ask
+    ask --> grade
+    grade --> update
+    update --> select : continue
+    update --> [*] : stop (verified | max_turns | inactive)
+```
+
+
+
 ## Core Functions
 | Function | Location | Purpose |
 | --- | --- | --- |
@@ -90,6 +102,8 @@ prolific_interview/
 | `decide_node` | `src/app/agents/interviewer/nodes/decide.py` | Decide whether to continue or stop the interview by checking max turns, verification coverage, and remaining active skills. |
 | `load_state` / `save_state` | `src/app/storage/store.py` | Persist and recover session state from Postgres (with an in-memory fallback) so interviews can resume mid-flow. |
 | `ensure_session_id` | `src/app/service/sessions.py` | Guarantee every client exchange has a stable session identifier to tie HTTP calls back to the same state record. |
+
+
 
 ## Setup
 1. **Dependencies** – Install [uv](https://github.com/astral-sh/uv) and create the Python 3.11 environment with `uv sync`.
@@ -119,46 +133,46 @@ With tracing on, every interview run is visible in LangSmith’s UI—use it to 
 ## Architecture at a Glance
 
 
-### Streamlit Operator Path
+### AI Interviewer Path
 ```mermaid
 flowchart LR
     Operator -->|browser| Streamlit
     Streamlit -->|SSE / REST| FastAPI
     FastAPI -->|grade events| Streamlit
-    Streamlit -->|telemetry| LangSmith
+    FastAPI -->|telemetry| LangSmith
 ```
 
 ### High Level System Architecture
 ```mermaid
 flowchart TD
-    subgraph 1_Ingestion
-        Uploads[CV / LinkedIn Uploads] --> API[Credential API]
-        API --> S3[S3: Raw Files]
-        API --> SQS[SQS Queue]
-        SQS --> ParserJob[Parser Job<br/>(LLM-based Extraction)]
-        ParserJob --> ProfileDB[(Profile Store: DynamoDB)]
+    subgraph Ingestion
+        Uploads[CV / LinkedIn Uploads] -->|API call| API[Credential API]
+        API -->|store| S3[(Raw Files)]
+        API -->|enqueue| SQS[[SQS Queue]]
+        SQS -->|process| ParserJob[Parser Job - LLM-based Extraction]
+        ParserJob -->|save| ProfileDB[(Profile Store: DynamoDB)]
     end
 
-    subgraph 2_Interviewer
-        ProfileDB --> FastAPI[[AI Interviewer API<br/>LangGraph Workflow]]
-        FastAPI --> Postgres[(Session DB)]
-        FastAPI --> LangSmith[(Tracing / Logs)]
-        Console[Operator Console (Streamlit)] <---> FastAPI
+    subgraph Interviewer
+        ProfileDB -->|query| FastAPI[[AI Interviewer API / LangGraph Workflow]]
+        FastAPI -->|store| Postgres[(Session DB)]
+        FastAPI -->|log| LangSmith(Tracing / Logs)
+        Console[Operator Console - Streamlit] <-->|interface| FastAPI
     end
 
-    subgraph 3_Verification
-        FastAPI --> Verifier[Verifier<br/>(External Sources / Consistency)]
-        Verifier --> ProfileDB
+    subgraph Verification
+        FastAPI -->|call| Verifier[Verifier - External Sources / Consistency]
+        Verifier -->|update| ProfileDB
     end
-
 ```
+
 
 1. Credential Ingestion
 - Candidates upload a CV or LinkedIn profile.
 - Files go to S3 and trigger a Parser Job (via SQS).
 - Parser extracts structured skill data and saves it to DynamoDB.
 
-2. AI Interviewer Core
+2. AI Interviewer Core [This is the core of the project]
 
 - FastAPI + LangGraph runs adaptive interview sessions.
 - Each turn updates the candidate’s skill confidence scores.
@@ -178,22 +192,12 @@ flowchart TD
 - Storage: results are written back to the Profile DB (DynamoDB) as structured JSON with evidence references.
 
 
-**Design notes**
-- The ingestion plane normalises credentials asynchronously: uploads hit an API, land on SQS, and the parser job (LLM- or rules-based) writes a canonical expertise profile with provenance into an analytical store.
-- The AI Interviewer core pulls those profiles, runs the LangGraph workflow (`generate → select → ask → grade → update → decide`), persists sessions in Postgres, and surfaces the flow through FastAPI/Streamlit with LangSmith tracing for observability.
-- A verification layer optionally cross-checks answers against stored evidence or external fact sources/NLP consistency models, feeding confidence scores and flags back to the interviewer and UI.
 
-### LangGraph Orchestration
-```mermaid
-stateDiagram-v2
-    [*] --> generate
-    generate --> select
-    select --> ask
-    ask --> grade
-    grade --> update
-    update --> select : continue
-    update --> [*] : stop (verified | max_turns | inactive)
-```
+## Bandit Confidence Policies (UCB & LCB)
+- **Upper Confidence Bound (UCB)**: Implemented in `src/app/agents/interviewer/utils/stats.py` via `select_skill_ucb_with_log`. In default “ucb1” mode the agent computes `UCB = mean + C * sqrt(log(t) / n_real)`, where `t` is the total number of graded questions so far and `n_real` is the number for the skill (excluding priors). A “se” mode is also available (`mean + C * se`) when you want exploration tied directly to statistical uncertainty.
+- **Dynamic difficulty**: `select_question_node` in `src/app/agents/interviewer/nodes/select.py` nudges question difficulty up after high scores (≥4) and down after weak answers (≤2), ensuring the UCB policy probes depth appropriately.
+- **Lower Confidence Bound (LCB)**: `compute_uncertainty` in `src/app/agents/interviewer/utils/stats.py` combines the running mean and variance to produce `LCB = mean - z * standard_error`. The z-score comes from the request payload so the service can tune strictness per interview, and a prior pseudo-count keeps early confidence intervals honest.
+- **Verification rule**: `update_node` in `src/app/agents/interviewer/nodes/update.py` declares a skill verified only when two conditions hold: the agent has asked at least `min_questions_per_skill` and the computed LCB clears the `verification_threshold`. Failing scores push the skill into an inactive pool so UCB stops sampling it, prompting `decide_node` to wrap up if no active skills remain.
 
 ### Deployment → FastAPI → Fargate
 ```mermaid
@@ -206,10 +210,3 @@ flowchart LR
     FastAPI --> Postgres[(Postgres / Aurora)]
     FastAPI --> LangSmith[(LangSmith Traces)]
 ```
-
-
-## Bandit Confidence Policies (UCB & LCB)
-- **Upper Confidence Bound (UCB)**: Implemented in `src/app/agents/interviewer/utils/stats.py` via `select_skill_ucb_with_log`. In default “ucb1” mode the agent computes `UCB = mean + C * sqrt(log(t) / n_real)`, where `t` is the total number of graded questions so far and `n_real` is the number for the skill (excluding priors). A “se” mode is also available (`mean + C * se`) when you want exploration tied directly to statistical uncertainty.
-- **Dynamic difficulty**: `select_question_node` in `src/app/agents/interviewer/nodes/select.py` nudges question difficulty up after high scores (≥4) and down after weak answers (≤2), ensuring the UCB policy probes depth appropriately.
-- **Lower Confidence Bound (LCB)**: `compute_uncertainty` in `src/app/agents/interviewer/utils/stats.py` combines the running mean and variance to produce `LCB = mean - z * standard_error`. The z-score comes from the request payload so the service can tune strictness per interview, and a prior pseudo-count keeps early confidence intervals honest.
-- **Verification rule**: `update_node` in `src/app/agents/interviewer/nodes/update.py` declares a skill verified only when two conditions hold: the agent has asked at least `min_questions_per_skill` and the computed LCB clears the `verification_threshold`. Failing scores push the skill into an inactive pool so UCB stops sampling it, prompting `decide_node` to wrap up if no active skills remain.
