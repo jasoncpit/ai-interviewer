@@ -28,6 +28,12 @@ class AgentClient:
             headers["X-API-Key"] = self.api_key
         return headers
 
+    def info(self) -> Dict[str, Any]:
+        with httpx.Client(timeout=10) as client:
+            r = client.get(f"{self.base_url}/info", headers=self._headers())
+            r.raise_for_status()
+            return r.json()
+
     def invoke(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         with httpx.Client(timeout=60) as client:
             r = client.post(
@@ -83,10 +89,14 @@ class AgentClient:
             yield {"event": "done", "data": '{"error":"remote_protocol_error"}'}
 
     def resume(
-        self, payload: Dict[str, Any], session_id: str
+        self, payload: Dict[str, Any], session_id: Optional[str] = None
     ) -> Iterator[Dict[str, Any]]:
+        if not session_id:
+            raise ValueError("session_id is required to resume an interview")
+
         headers = self._headers()
         headers["session-id"] = session_id
+
         try:
             with httpx.Client(
                 timeout=httpx.Timeout(None, read=None, connect=10)

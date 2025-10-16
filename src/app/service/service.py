@@ -200,71 +200,90 @@ async def resume(
     x_api_key: str | None = Header(default=None),
     session_id: str | None = Header(default=None),
 ) -> StreamingResponse:
-    """Resume the interview after the operator supplies the candidate answer."""
+    """Resume an interview once the operator submits the candidate's answer."""
     verify_api_key(x_api_key)
 
     async def event_gen() -> AsyncGenerator[bytes, None]:
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id header required")
+
         state = load_state(session_id)
         if not state:
             raise HTTPException(status_code=404, detail="session not found")
-        # Accept answer and continue grade/update/decide
+
+        if state.get("current_question") is None:
+            raise HTTPException(
+                status_code=409,
+                detail="no pending question for this session",
+            )
+
         state["pending_answer"] = request.answer or ""
-        state2 = await grade_node(state)
+        state = await grade_node(state)
+        grade = state.get("last_grade")
+        if grade is None:
+            raise HTTPException(
+                status_code=500, detail="grading failed to produce a score"
+            )
+
         yield _encode_event(
             "message",
             {
                 "type": "grade",
-                "score": state2["last_grade"].score,
-                "reason": state2["last_grade"].reasoning,
-            },
-        )
-        state2 = update_node(state2)
-        yield _encode_event(
-            "state",
-            {
-                "belief_state": state2["belief_state"],
-                "skill_summaries": state2.get(
-                    "skill_summaries", summarise_skills(state2)
-                ),
-                "logs": state2.get("logs", [])[-50:],
+                "score": grade.score,
+                "reason": grade.reasoning,
             },
         )
 
-        # Decide next step
-        cmd = decide_node(state2)
+        state = update_node(state)
+
+        yield _encode_event(
+            "state",
+            {
+                "belief_state": state.get("belief_state", {}),
+                "skill_summaries": state.get(
+                    "skill_summaries", summarise_skills(state)
+                ),
+                "logs": state.get("logs", [])[-50:],
+            },
+        )
+
+        cmd = decide_node(state)
+        done_payload: Dict[str, Any]
+
         if cmd.goto == "select":
-            # Start next turn (generate/select/ask) and interrupt again
-            state2 = await select_question_node(state2)
-            # Surface the follow-up question immediately.
+            seeded = False
+            if not state.get("question_pool"):
+                state = await generate_questions_node(state)
+                seeded = True
+
+            if seeded:
+                yield _encode_event("node_end", {"node": "generate"})
+            state = await select_question_node(state)
             yield _encode_event(
                 "message",
                 {
                     "type": "question",
-                    "skill": state2["current_question"].skill,
-                    "text": state2["current_question"].text,
+                    "skill": state["current_question"].skill,
+                    "text": state["current_question"].text,
                 },
             )
-            state2 = ask_node(state2)
-            # Heartbeat
+            state = ask_node(state)
             yield b": keep-alive\n\n"
             yield _encode_event("interrupt", {"schema": {"answer": "string"}})
+            done_payload = {"status": "awaiting_answer"}
         else:
-            yield _encode_event(
-                "done",
-                {
-                    "verified": state2["verified_skills"],
-                    "inactive": state2["inactive_skills"],
-                    "skill_summaries": state2.get(
-                        "skill_summaries", summarise_skills(state2)
-                    ),
-                    "turn": state2["turn"],
-                    "logs": state2.get("logs", [])[-50:],
-                },
-            )
+            done_payload = {
+                "verified": state.get("verified_skills", []),
+                "inactive": state.get("inactive_skills", []),
+                "skill_summaries": state.get(
+                    "skill_summaries", summarise_skills(state)
+                ),
+                "turn": state.get("turn", 0),
+                "logs": state.get("logs", [])[-50:],
+            }
 
-        _persist_state(session_id, state2)
+        _persist_state(session_id, state)
+        yield _encode_event("done", done_payload)
 
     return StreamingResponse(
         event_gen(),

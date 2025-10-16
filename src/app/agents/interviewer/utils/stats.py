@@ -4,9 +4,9 @@ import math
 from typing import Dict, List, Literal, Tuple
 
 PRIOR_MEAN = 2.5
-PRIOR_VARIANCE = 1.5  # prior belief about variance on 1–5 rubric
-PRIOR_STRENGTH = 2  # pseudo-samples injected as a prior
-SE_FLOOR = 0.25  # guardrail for tiny sample sizes
+PRIOR_VARIANCE = 1  # prior belief about variance on 1–5 rubric
+PRIOR_STRENGTH = 1  # pseudo-samples injected as a prior
+SE_FLOOR = 0.15  # guardrail for tiny sample sizes
 SE_FLOOR_MIN_REAL = 2  # keep the guardrail until we have this many real samples
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app.agents.interviewer.prompts.grade import GRADE_PROMPT
 from app.agents.interviewer.utils.state import append_log
-from app.core.llm import get_llm
+import app.core.llm as llm_module
 from app.schema.models import Grade, InterviewState
 
 
@@ -12,7 +12,7 @@ async def grade_node(state: InterviewState) -> InterviewState:
     assert question is not None
     answer = state.get("pending_answer") or ""
 
-    llm = get_llm()
+    llm = llm_module.get_llm()
     structured_llm = llm.with_structured_output(Grade)
     grade = await structured_llm.ainvoke(
         GRADE_PROMPT.format(

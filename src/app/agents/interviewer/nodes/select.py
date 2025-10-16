@@ -11,7 +11,7 @@ from app.agents.interviewer.utils.state import (
     record_question,
 )
 from app.agents.interviewer.utils.stats import select_skill_ucb_with_log
-from app.core.llm import get_llm
+import app.core.llm as llm_module
 from app.schema.models import InterviewState, Question
 
 
@@ -99,7 +99,7 @@ async def select_question_node(state: InterviewState) -> InterviewState:
 
     if candidate is None:
         source = "llm"
-        llm = get_llm()
+        llm = llm_module.get_llm()
         structured_llm = llm.with_structured_output(Question)
         evidence = "\n".join(state.get("spans_map", {}).get(skill, []))
         prev_q = (

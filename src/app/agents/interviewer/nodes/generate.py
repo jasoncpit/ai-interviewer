@@ -6,7 +6,7 @@ from typing import Any, List
 
 from app.agents.interviewer.prompts.generate import QUESTION_PROMPT
 from app.agents.interviewer.utils.state import append_log, history_snippet
-from app.core.llm import get_llm
+import app.core.llm as llm_module
 from app.schema.models import InterviewState, Question
 
 
@@ -59,7 +59,8 @@ async def generate_questions_node(state: InterviewState) -> InterviewState:
         else ""
     )
     prev_ans = state.get("last_answer") or ""
-    llm = get_llm()
+    # Import via module to keep patching straightforward in unit tests.
+    llm = llm_module.get_llm()
     structured_llm = llm.with_structured_output(Question)
     questions: List[Question] = []
     for skill in state.get("skills", []):

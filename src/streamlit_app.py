@@ -208,17 +208,48 @@ with st.sidebar:
             st.session_state.pop("current_question", None)
             st.rerun()
     with c2:
-        st.button(
+        if st.button(
             "Continue",
             key="sidebar_continue",
             help="If the interview is waiting for your answer, continue after submitting it.",
-        )
+        ):
+            try:
+                client = AgentClient(base_url=base_url)
+                payload = {
+                    "profile": json.loads(st.session_state.get("profile_json", "{}")),
+                    "max_turns": max_turns,
+                    "min_q": min_q,
+                    "verify_lcb": verify_lcb,
+                    "z_value": z_value,
+                    "ucb_C": ucb_C,
+                }
+                sid = st.session_state.get("session_id")
+                if sid:
+                    for evt in client.stream(payload, session_id=sid):
+                        signal = handle_stream_event(evt.get("event"), evt.get("data"))
+                        if signal:
+                            break
+                else:
+                    st.warning("No session to continue. Start a session first.")
+            except Exception:
+                st.error("Could not reach the service to continue the session.")
+            st.rerun()
 
     share_url = get_share_url()
     st.caption("Share/resume link")
     st.code(share_url or "(set a session first)", language="text")
 
     st.divider()
+    # Simple service health check
+    if st.button("Service health"):
+        try:
+            client = AgentClient(base_url=base_url)
+            info = client.info()
+            st.success(
+                f"OK: {info.get('app', 'service')} - models: {', '.join(info.get('models', []))}"
+            )
+        except Exception as exc:
+            st.error(f"Service unreachable: {exc}")
     render_skill_status()
     with st.expander("Agent Logs", expanded=False):
         logs = st.session_state.get("agent_logs", [])

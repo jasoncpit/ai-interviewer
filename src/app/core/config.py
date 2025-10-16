@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     # LLM
     openai_model: str = "gpt-4o-mini"
     openai_temperature: float = 0.4
+    openai_api_key: str | None = None
 
     # Database
     database_url: str = "postgresql+psycopg://postgres:postgres@postgres:5432/prolific"

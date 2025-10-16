@@ -28,10 +28,3 @@ repos:
       - id: ruff
         args: ["--fix"]
         files: ^(src|test)/.*\.py$
-
-  - repo: https://github.com/psf/black
-    rev: 24.10.0
-    hooks:
-      - id: black
-        language_version: python3
-        files: ^(src|test)/.*\.py$
