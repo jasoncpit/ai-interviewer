@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Any, Dict, List, Sequence
 
 from langgraph.graph import START, StateGraph
 from langgraph.types import Command
@@ -12,14 +12,18 @@ from app.agents.interviewer.nodes.grade import grade_node
 from app.agents.interviewer.nodes.select import select_question_node
 from app.agents.interviewer.nodes.update import update_node
 from app.agents.interviewer.utils.state import append_log, summarise_skills
+from app.agents.interviewer.utils.stats import compute_uncertainty, ensure_prior
 from app.schema.models import InterviewState
 
 
-def _initial_belief(skills: List[str]) -> Dict[str, Dict[str, float]]:
-    return {
-        skill: {"mean": 2.5, "n": 0, "m2": 0.0, "se": 0.0, "lcb": 2.5}
-        for skill in skills
-    }
+def _initial_belief(skills: List[str], z_value: float) -> Dict[str, Dict[str, float]]:
+    beliefs: Dict[str, Dict[str, float]] = {}
+    for skill in skills:
+        belief: Dict[str, float] = {}
+        ensure_prior(belief)
+        compute_uncertainty(belief, z_value, add_ucb=False)
+        beliefs[skill] = belief
+    return beliefs
 
 
 def build_state(
@@ -33,7 +37,7 @@ def build_state(
 ) -> InterviewState:
     state: InterviewState = {
         "skills": skills,
-        "belief_state": _initial_belief(skills),
+        "belief_state": _initial_belief(skills, z_value),
         "question_pool": [],
         "current_question": None,
         "last_grade": None,
@@ -50,6 +54,7 @@ def build_state(
         "verified_skills": [],
         "logs": [],
         "skill_summaries": [],
+        "question_history": [],
     }
     append_log(
         state,
@@ -59,7 +64,12 @@ def build_state(
     return state  # type: ignore[return-value]
 
 
-def build_graph():
+def build_graph(
+    *,
+    checkpointer: Any | None = None,
+    interrupt_before: Sequence[str] | None = None,
+    interrupt_after: Sequence[str] | None = None,
+):
     g = StateGraph(InterviewState)
     g.add_node("generate", generate_questions_node)
     g.add_node("select", select_question_node)
@@ -76,4 +86,8 @@ def build_graph():
     g.add_edge("grade", "update")
     g.add_conditional_edges("update", route)
 
-    return g.compile()
+    return g.compile(
+        checkpointer=checkpointer,
+        interrupt_before=interrupt_before,
+        interrupt_after=interrupt_after,
+    )

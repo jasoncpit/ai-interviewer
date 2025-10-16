@@ -45,7 +45,16 @@ prolific_interview/
 | `ensure_session_id` | `src/app/service/sessions.py` | Guarantee every client exchange has a stable session identifier to tie HTTP calls back to the same state record. |
 
 ## Bandit Confidence Policies (UCB & LCB)
-- **Upper Confidence Bound (UCB)**: Implemented in `src/app/agents/interviewer/utils/stats.py` via `select_skill_ucb_with_log`. For each skill the agent computes `UCB = mean + C * sqrt(log(t + 1) / (n + 1))`, where `t` is the total turn count and `n` is the number of observations for that skill. The exploration term keeps occasionally revisiting under-sampled skills, preventing the loop from tunnel-visioning on a single domain.
+- **Upper Confidence Bound (UCB)**: Implemented in `src/app/agents/interviewer/utils/stats.py` via `select_skill_ucb_with_log`. In default “ucb1” mode the agent computes `UCB = mean + C * sqrt(log(t) / n_real)`, where `t` is the total number of graded questions so far and `n_real` is the number for the skill (excluding priors). A “se” mode is also available (`mean + C * se`) when you want exploration tied directly to statistical uncertainty.
 - **Dynamic difficulty**: `select_question_node` in `src/app/agents/interviewer/nodes/select.py` nudges question difficulty up after high scores (≥4) and down after weak answers (≤2), ensuring the UCB policy probes depth appropriately.
-- **Lower Confidence Bound (LCB)**: `compute_se_lcb` in `src/app/agents/interviewer/utils/stats.py` combines the running mean and variance to produce `LCB = mean - z * standard_error`. The z-score comes from the request payload so the service can tune strictness per interview.
+- **Lower Confidence Bound (LCB)**: `compute_uncertainty` in `src/app/agents/interviewer/utils/stats.py` combines the running mean and variance to produce `LCB = mean - z * standard_error`. The z-score comes from the request payload so the service can tune strictness per interview, and a prior pseudo-count keeps early confidence intervals honest.
 - **Verification rule**: `update_node` in `src/app/agents/interviewer/nodes/update.py` declares a skill verified only when two conditions hold: the agent has asked at least `min_questions_per_skill` and the computed LCB clears the `verification_threshold`. Failing scores push the skill into an inactive pool so UCB stops sampling it, prompting `decide_node` to wrap up if no active skills remain.
+
+## To do
+
+- [] Setup LangSmith for monitoring and debugging
+- [] Polish notes and notebook for better documentation
+- [] Add more tests for the llm and FastAPI service
+- [] Add architecture diagrams
+- [] Add LangGraph orchestration charts
+- [] A section on UCB and LCB for the selector node

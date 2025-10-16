@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any, List
 
 from app.agents.interviewer.prompts.generate import QUESTION_PROMPT
-from app.agents.interviewer.utils.state import append_log
-from app.core.llm import get_llm
+from app.agents.interviewer.utils.state import append_log, history_snippet
+import app.core.llm as llm_module
 from app.schema.models import InterviewState, Question
 
 
@@ -17,6 +17,7 @@ async def _draft_question(
     previous_question: str,
     previous_answer: str,
     previous_reasoning: str,
+    recent_history: str,
 ) -> Question:
     """Invoke the LLM for a single skill."""
     question = await structured_llm.ainvoke(
@@ -28,6 +29,7 @@ async def _draft_question(
             previous_question=previous_question,
             previous_answer=previous_answer,
             previous_reasoning=previous_reasoning,
+            recent_history=recent_history,
         )
     )
     # Some models omit the skill field when using structured output; enforce it.
@@ -57,11 +59,13 @@ async def generate_questions_node(state: InterviewState) -> InterviewState:
         else ""
     )
     prev_ans = state.get("last_answer") or ""
-    llm = get_llm()
+    # Import via module to keep patching straightforward in unit tests.
+    llm = llm_module.get_llm()
     structured_llm = llm.with_structured_output(Question)
     questions: List[Question] = []
     for skill in state.get("skills", []):
         evidence = spans_map.get(skill, [])
+        history_ctx = history_snippet(state, skill)
         try:
             questions.append(
                 await _draft_question(
@@ -71,6 +75,7 @@ async def generate_questions_node(state: InterviewState) -> InterviewState:
                     previous_question=prev_q,
                     previous_answer=prev_ans,
                     previous_reasoning=prev_reason,
+                    recent_history=history_ctx,
                 )
             )
         except Exception as exc:  # pragma: no cover - network dependent

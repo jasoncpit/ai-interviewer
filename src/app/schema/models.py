@@ -11,9 +11,33 @@ class Question(BaseModel):
     difficulty: int = Field(ge=1, le=5, description="1=easiest … 5=hardest")
 
 
+class AspectBreakdown(BaseModel):
+    score: int = Field(ge=1, le=5, description="Aspect-specific score 1..5")
+    notes: str = Field(default="", description="Short justification for the aspect score.")
+
+
+class GradeDraft(BaseModel):
+    reasoning: str = Field(
+        default="",
+        description="Overall justification that highlights strengths and weaknesses.",
+    )
+    aspects: Dict[str, AspectBreakdown] = Field(
+        default_factory=dict,
+        description="Per-aspect scores and notes prior to final aggregation.",
+    )
+    factual_error: bool = Field(
+        default=False,
+        description="True when the response contains a factual or safety-critical error.",
+    )
+
+
 class Grade(BaseModel):
     score: int = Field(ge=1, le=5, description="Rubric score 1..5")
     reasoning: str = Field(default="simulated")
+    aspects: Dict[str, AspectBreakdown] = Field(
+        default_factory=dict,
+        description="Per-aspect scores and notes used to arrive at the final grade.",
+    )
 
 
 class InterviewState(TypedDict):
@@ -35,6 +59,7 @@ class InterviewState(TypedDict):
     verified_skills: List[str]
     logs: List[str]
     skill_summaries: List[Dict[str, object]]
+    question_history: List[Dict[str, object]]
 
 
 class InvokeRequest(BaseModel):
@@ -49,3 +74,20 @@ class InvokeRequest(BaseModel):
 
 class InvokeResponse(BaseModel):
     state: Dict[str, Any]
+
+
+class SimulateAnswerRequest(BaseModel):
+    question: str = Field(min_length=5)
+    skill: str = Field(min_length=1)
+    persona: Optional[str] = Field(
+        default=None,
+        description="Optional persona or tone instructions for the simulated candidate.",
+    )
+    history: List[str] = Field(
+        default_factory=list,
+        description="Recent conversation snippets to preserve context.",
+    )
+
+
+class SimulateAnswerResponse(BaseModel):
+    answer: str = Field(min_length=1)

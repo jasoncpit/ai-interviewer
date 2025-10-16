@@ -21,7 +21,14 @@ from app.service.utils.profile import (
 )
 
 from ..core.config import get_settings
-from ..schema.models import InterviewState, InvokeRequest, InvokeResponse
+from ..core.llm import get_llm
+from ..schema.models import (
+    InterviewState,
+    InvokeRequest,
+    InvokeResponse,
+    SimulateAnswerRequest,
+    SimulateAnswerResponse,
+)
 from ..storage.store import load_state, save_state
 
 settings = get_settings()
@@ -193,71 +200,94 @@ async def resume(
     x_api_key: str | None = Header(default=None),
     session_id: str | None = Header(default=None),
 ) -> StreamingResponse:
-    """Resume the interview after the operator supplies the candidate answer."""
+    """Resume an interview once the operator submits the candidate's answer."""
     verify_api_key(x_api_key)
 
     async def event_gen() -> AsyncGenerator[bytes, None]:
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id header required")
+
         state = load_state(session_id)
         if not state:
             raise HTTPException(status_code=404, detail="session not found")
-        # Accept answer and continue grade/update/decide
+
+        if state.get("current_question") is None:
+            raise HTTPException(
+                status_code=409,
+                detail="no pending question for this session",
+            )
+
         state["pending_answer"] = request.answer or ""
-        state2 = await grade_node(state)
+        state = await grade_node(state)
+        grade = state.get("last_grade")
+        if grade is None:
+            raise HTTPException(
+                status_code=500, detail="grading failed to produce a score"
+            )
+
         yield _encode_event(
             "message",
             {
                 "type": "grade",
-                "score": state2["last_grade"].score,
-                "reason": state2["last_grade"].reasoning,
-            },
-        )
-        state2 = update_node(state2)
-        yield _encode_event(
-            "state",
-            {
-                "belief_state": state2["belief_state"],
-                "skill_summaries": state2.get(
-                    "skill_summaries", summarise_skills(state2)
-                ),
-                "logs": state2.get("logs", [])[-50:],
+                "score": grade.score,
+                "reason": grade.reasoning,
+                "aspects": {
+                    name: {"score": detail.score, "notes": detail.notes}
+                    for name, detail in grade.aspects.items()
+                },
             },
         )
 
-        # Decide next step
-        cmd = decide_node(state2)
+        state = update_node(state)
+
+        yield _encode_event(
+            "state",
+            {
+                "belief_state": state.get("belief_state", {}),
+                "skill_summaries": state.get(
+                    "skill_summaries", summarise_skills(state)
+                ),
+                "logs": state.get("logs", [])[-50:],
+            },
+        )
+
+        cmd = decide_node(state)
+        done_payload: Dict[str, Any]
+
         if cmd.goto == "select":
-            # Start next turn (generate/select/ask) and interrupt again
-            state2 = await select_question_node(state2)
-            # Surface the follow-up question immediately.
+            seeded = False
+            if not state.get("question_pool"):
+                state = await generate_questions_node(state)
+                seeded = True
+
+            if seeded:
+                yield _encode_event("node_end", {"node": "generate"})
+            state = await select_question_node(state)
             yield _encode_event(
                 "message",
                 {
                     "type": "question",
-                    "skill": state2["current_question"].skill,
-                    "text": state2["current_question"].text,
+                    "skill": state["current_question"].skill,
+                    "text": state["current_question"].text,
                 },
             )
-            state2 = ask_node(state2)
-            # Heartbeat
+            state = ask_node(state)
             yield b": keep-alive\n\n"
             yield _encode_event("interrupt", {"schema": {"answer": "string"}})
+            done_payload = {"status": "awaiting_answer"}
         else:
-            yield _encode_event(
-                "done",
-                {
-                    "verified": state2["verified_skills"],
-                    "inactive": state2["inactive_skills"],
-                    "skill_summaries": state2.get(
-                        "skill_summaries", summarise_skills(state2)
-                    ),
-                    "turn": state2["turn"],
-                    "logs": state2.get("logs", [])[-50:],
-                },
-            )
+            done_payload = {
+                "verified": state.get("verified_skills", []),
+                "inactive": state.get("inactive_skills", []),
+                "skill_summaries": state.get(
+                    "skill_summaries", summarise_skills(state)
+                ),
+                "turn": state.get("turn", 0),
+                "logs": state.get("logs", [])[-50:],
+            }
 
-        _persist_state(session_id, state2)
+        _persist_state(session_id, state)
+        yield _encode_event("done", done_payload)
 
     return StreamingResponse(
         event_gen(),
@@ -268,3 +298,53 @@ async def resume(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+DEFAULT_SIM_PERSONA = (
+    "You are a cooperative candidate who answers honestly, highlighting strengths "
+    "without bluffing. Provide 4-6 sentences with practical detail."
+)
+
+
+@app.post("/simulation/answer", response_model=SimulateAnswerResponse)
+async def simulation_answer(
+    request: SimulateAnswerRequest,
+    x_api_key: str | None = Header(default=None),
+) -> SimulateAnswerResponse:
+    """Generate a mock candidate answer using the backend's LLM."""
+
+    verify_api_key(x_api_key)
+
+    persona = request.persona.strip() if request.persona else DEFAULT_SIM_PERSONA
+    history_block = "\n".join(request.history) if request.history else ""
+    prompt_parts = [
+        persona,
+        f"Skill: {request.skill}",
+        f"Question: {request.question}",
+    ]
+    if history_block:
+        prompt_parts.append("Recent context:")
+        prompt_parts.append(history_block)
+    prompt_parts.append(
+        "Answer the question in 4-6 sentences. Be specific, mention trade-offs, "
+        "and acknowledge uncertainty if you are unsure."
+    )
+    prompt = "\n".join(prompt_parts)
+
+    llm = get_llm(temperature=0.4)
+    try:
+        message = await llm.ainvoke(prompt)
+        answer = getattr(message, "content", str(message)).strip()
+    except Exception:
+        answer = (
+            "I would outline the key steps, explain the reasoning behind them, and "
+            "note any risks or assumptions before proceeding. (simulated fallback)"
+        )
+
+    if not answer:
+        answer = (
+            "I would start by explaining the core approach and highlight where I "
+            "need clarification before moving forward. (simulated fallback)"
+        )
+
+    return SimulateAnswerResponse(answer=answer)

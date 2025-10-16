@@ -22,6 +22,8 @@ def init_session_state():
         st.session_state["verified_skills"] = []
     if "agent_logs" not in st.session_state:
         st.session_state["agent_logs"] = []
+    if "session_started" not in st.session_state:
+        st.session_state["session_started"] = False
 
 
 def handle_stream_event(event: str, data: str, log=None) -> Optional[str]:
@@ -39,7 +41,14 @@ def handle_stream_event(event: str, data: str, log=None) -> Optional[str]:
                 {"role": "assistant", "content": payload.get("text")}
             )
         elif payload.get("type") == "grade":
-            text = f"Grade: {payload.get('score')} — {payload.get('reason', '')}"
+            aspects = payload.get("aspects") or {}
+            aspect_bits = ", ".join(
+                f"{name}: {details.get('score')}"
+                for name, details in aspects.items()
+                if isinstance(details, dict) and "score" in details
+            )
+            detail_suffix = f" | {aspect_bits}" if aspect_bits else ""
+            text = f"Grade: {payload.get('score')} — {payload.get('reason', '')}{detail_suffix}"
             st.session_state["chat"].append({"role": "assistant", "content": text})
         return None
 
@@ -75,13 +84,16 @@ def handle_done_event(payload: Optional[dict]) -> str:
 
     if payload.get("error") == "remote_protocol_error":
         st.warning("Stream ended unexpectedly. Please try again.")
+        st.session_state["session_started"] = False
         return "done"
 
     if payload.get("status") == "awaiting_answer":
         st.session_state["awaiting_answer"] = True
+        st.session_state["session_started"] = True
         return "interrupt"
 
     st.session_state["awaiting_answer"] = False
+    st.session_state["session_started"] = False
     st.session_state["skill_summaries"] = payload.get("skill_summaries", [])
     st.session_state["verified_skills"] = payload.get("verified", [])
     if payload:
@@ -91,6 +103,13 @@ def handle_done_event(payload: Optional[dict]) -> str:
         st.session_state["chat"].append({"role": "assistant", "content": summary})
     st.balloons()
     return "done"
+
+
+SIMULATION_PERSONA_DEFAULT = (
+    "You are a cooperative candidate who answers honestly, showing strengths "
+    "without bluffing. Provide 4-6 sentences with practical detail and admit "
+    "uncertainty when appropriate."
+)
 
 
 def render_skill_status() -> None:
@@ -125,40 +144,6 @@ def get_share_url():
     ):
         st_base_url = st_base_url.replace("http", "https")
     return f"{st_base_url}?session_id={st.session_state.get('session_id', '')}"
-
-
-def render_right_panel() -> None:
-    """Persistent right-hand panel with session controls and status."""
-    # Session controls
-    st.subheader("Session")
-    current_sid = st.text_input(
-        "Session ID", value=st.session_state.get("session_id", "")
-    )
-    if current_sid and current_sid != st.session_state.get("session_id"):
-        st.session_state["session_id"] = current_sid
-        st.query_params["session_id"] = current_sid
-
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("New session", key="right_new_session"):
-            new_sid = f"session-{uuid.uuid4()}"
-            st.session_state["session_id"] = new_sid
-            st.query_params["session_id"] = new_sid
-            st.session_state["chat"] = []
-            st.session_state.pop("awaiting_answer", None)
-            st.session_state.pop("current_question", None)
-            st.rerun()
-    with c2:
-        if st.button("Continue", key="right_continue"):
-            st.session_state["continue_requested"] = True
-
-    # Share/resume link
-    share_url = get_share_url()
-    st.caption("Share/resume link")
-    st.code(share_url or "(set a session first)", language="text")
-
-    st.divider()
-    render_skill_status()
 
 
 # Initialize app
@@ -200,7 +185,7 @@ with st.sidebar:
         "Z value",
         min_value=0.0,
         max_value=5.0,
-        value=1.96,
+        value=1.69,
         step=0.01,
         help="Z-score used for confidence intervals when estimating skill proficiency.",
     )
@@ -208,7 +193,7 @@ with st.sidebar:
         "UCB C",
         min_value=0.0,
         max_value=5.0,
-        value=1.0,
+        value=2.0,
         step=0.1,
         help="Exploration coefficient for UCB selection (higher explores more).",
     )
@@ -233,19 +218,51 @@ with st.sidebar:
             st.session_state["chat"] = []
             st.session_state.pop("awaiting_answer", None)
             st.session_state.pop("current_question", None)
+            st.session_state["session_started"] = False
             st.rerun()
     with c2:
-        st.button(
+        if st.button(
             "Continue",
             key="sidebar_continue",
             help="If the interview is waiting for your answer, continue after submitting it.",
-        )
+        ):
+            try:
+                client = AgentClient(base_url=base_url)
+                payload = {
+                    "profile": json.loads(st.session_state.get("profile_json", "{}")),
+                    "max_turns": max_turns,
+                    "min_q": min_q,
+                    "verify_lcb": verify_lcb,
+                    "z_value": z_value,
+                    "ucb_C": ucb_C,
+                }
+                sid = st.session_state.get("session_id")
+                if sid:
+                    for evt in client.stream(payload, session_id=sid):
+                        signal = handle_stream_event(evt.get("event"), evt.get("data"))
+                        if signal:
+                            break
+                else:
+                    st.warning("No session to continue. Start a session first.")
+            except Exception:
+                st.error("Could not reach the service to continue the session.")
+            st.rerun()
 
     share_url = get_share_url()
     st.caption("Share/resume link")
     st.code(share_url or "(set a session first)", language="text")
 
     st.divider()
+    # Simple service health check
+    if st.button("Service health"):
+        try:
+            client = AgentClient(base_url=base_url)
+            info = client.info()
+            st.success(
+                f"OK: {info.get('app', 'service')} - models: {', '.join(info.get('models', []))}"
+            )
+        except Exception as exc:
+            st.error(f"Service unreachable: {exc}")
     render_skill_status()
     with st.expander("Agent Logs", expanded=False):
         logs = st.session_state.get("agent_logs", [])
@@ -253,6 +270,16 @@ with st.sidebar:
             st.code("\n".join(logs[-200:]), language="text")
         else:
             st.caption("No logs yet. Run an interview to see logs.")
+
+    st.divider()
+    st.subheader("Simulation")
+    sim_persona_input = st.text_area(
+        "Persona prompt",
+        value=st.session_state.get("simulation_persona", SIMULATION_PERSONA_DEFAULT),
+        height=140,
+        help="Used when auto-generating candidate answers via the simulation button.",
+    )
+    st.session_state["simulation_persona"] = sim_persona_input
 
 st.title("Prolific AI Interviewer")
 init_session_state()
@@ -347,6 +374,25 @@ profile_json = st.text_area(
     help="This is the candidate profile sent to the agent. Edit to customize.",
 )
 
+try:
+    profile_data = json.loads(profile_json)
+except json.JSONDecodeError as exc:
+    st.error(f"Profile JSON is invalid: {exc}")
+    st.stop()
+
+base_payload = {
+    "profile": profile_data,
+    "max_turns": max_turns,
+    "min_q": min_q,
+    "verify_lcb": verify_lcb,
+    "z_value": z_value,
+    "ucb_C": ucb_C,
+}
+resume_payload_base = {"profile": profile_data}
+simulation_persona = st.session_state.get(
+    "simulation_persona", SIMULATION_PERSONA_DEFAULT
+)
+
 # Auto-resume: if a session id is provided via URL and the chat is empty, re-emit the pending question
 if (
     st.session_state.get("session_id")
@@ -355,66 +401,65 @@ if (
 ):
     try:
         client = AgentClient(base_url=base_url)
-        payload = {
-            "profile": json.loads(profile_json),
-            "max_turns": max_turns,
-            "min_q": min_q,
-            "verify_lcb": verify_lcb,
-            "z_value": z_value,
-            "ucb_C": ucb_C,
-        }
+        payload = dict(base_payload)
         session_id = st.session_state.get("session_id")
         for evt in client.stream(payload, session_id=session_id):
-            if handle_stream_event(evt.get("event"), evt.get("data")):
+            signal = handle_stream_event(evt.get("event"), evt.get("data"))
+            if signal:
                 break
         st.session_state["auto_resumed"] = True
         st.rerun()
     except Exception:
-        # If resume fails (e.g., no backend state), just continue without crashing the page
         st.session_state["auto_resumed"] = True
 
-# Main interface
-if st.button("Run (SSE)"):
-    client = AgentClient(base_url=base_url)
-    payload = {
-        "profile": json.loads(profile_json),
-        "max_turns": max_turns,
-        "min_q": min_q,
-        "verify_lcb": verify_lcb,
-        "z_value": z_value,
-        "ucb_C": ucb_C,
-    }
-    log = st.empty()
-    session_id = st.session_state.get("session_id") or f"session-{uuid.uuid4()}"
-    st.session_state["session_id"] = session_id
+chat_history = st.session_state.get("chat", [])
+if chat_history:
+    st.divider()
+    for entry in chat_history:
+        role = entry.get("role", "assistant")
+        content = entry.get("content", "")
+        if not content:
+            continue
+        with st.chat_message(role):
+            st.markdown(content)
 
-    try:
-        for evt in client.stream(payload, session_id=session_id):
-            signal = handle_stream_event(evt.get("event"), evt.get("data"), log)
-            if signal in {"interrupt", "done"}:
-                break
-    except Exception:
-        st.error("Streaming error. Please check the service and try again.")
-    st.rerun()
+show_start_button = not st.session_state.get("session_started")
+if show_start_button:
+    if st.button(
+        "Start Interview",
+        disabled=bool(st.session_state.get("awaiting_answer")),
+        type="primary",
+    ):
+        st.session_state["session_started"] = True
+        client = AgentClient(base_url=base_url)
+        payload = dict(base_payload)
+        session_id = st.session_state.get("session_id") or f"session-{uuid.uuid4()}"
+        st.session_state["session_id"] = session_id
 
-# Chat history
-for msg in st.session_state.get("chat", []):
-    with st.chat_message("user" if msg["role"] == "user" else "assistant"):
-        st.markdown(msg["content"])
-
-# Verification status now lives in the sidebar
+        try:
+            for evt in client.stream(payload, session_id=session_id):
+                signal = handle_stream_event(evt.get("event"), evt.get("data"))
+                if signal in {"interrupt", "done"}:
+                    break
+        except Exception:
+            st.error("Streaming error. Please check the service and try again.")
+        st.rerun()
+else:
+    st.caption("Interview in progress. Respond to the current question or use the sidebar to resume/end.")
 
 # Handle answer input
 if st.session_state.get("awaiting_answer"):
     st.divider()
     answer = st.chat_input("Your answer")
+    simulate = st.checkbox(
+        "Simulate answer",
+        value=False,
+        help="When checked, the app will auto-generate an answer using the backend and submit it.",
+    )
     if answer:
         st.session_state["chat"].append({"role": "user", "content": answer})
         client = AgentClient(base_url=base_url)
-        payload = {
-            "profile": json.loads(profile_json),
-            "answer": answer,
-        }
+        payload = {**resume_payload_base, "answer": answer}
         session_id = st.session_state.get("session_id") or f"session-{uuid.uuid4()}"
         try:
             for evt in client.resume(payload, session_id=session_id):
@@ -424,3 +469,37 @@ if st.session_state.get("awaiting_answer"):
         except Exception:
             st.error("Streaming error. Please check the service and try again.")
         st.rerun()
+
+    # Optional: auto-generate an answer when simulate is checked
+    if simulate and st.session_state.get("awaiting_answer"):
+        question = st.session_state.get("current_question") or {}
+        try:
+            client = AgentClient(base_url=base_url)
+            sim = client.simulate_answer(
+                {
+                    "question": question.get("text", ""),
+                    "skill": question.get("skill", "unknown"),
+                    "persona": simulation_persona,
+                    "history": [
+                        f"{m['role']}: {m['content']}"
+                        for m in st.session_state.get("chat", [])[-6:]
+                    ],
+                }
+            )
+            sim_answer = sim.get("answer", "").strip()
+        except Exception as exc:
+            st.error(f"Simulation error: {exc}")
+            sim_answer = ""
+        if sim_answer:
+            st.session_state["chat"].append({"role": "user", "content": sim_answer})
+            client = AgentClient(base_url=base_url)
+            payload = {**resume_payload_base, "answer": sim_answer}
+            session_id = st.session_state.get("session_id") or f"session-{uuid.uuid4()}"
+            try:
+                for evt in client.resume(payload, session_id=session_id):
+                    signal = handle_stream_event(evt.get("event"), evt.get("data"))
+                    if signal in {"interrupt", "done"}:
+                        break
+            except Exception:
+                st.error("Streaming error. Please check the service and try again.")
+            st.rerun()

@@ -2,30 +2,36 @@ from langchain_core.prompts import ChatPromptTemplate
 
 GRADE_PROMPT = ChatPromptTemplate.from_template(
     """
-    Grade this technical interview response about {skill}.
-    Question (difficulty {difficulty}/5): {question}
-    Response: {response}
+    You are a rigorous technical examiner. Assess the candidate's response about {skill}.
 
-    Grading Rubric (be strict and conservative):
-    1 - Incorrect or irrelevant answer showing minimal understanding
-    2 - Partially correct but with significant gaps or misconceptions
-    3 - Mostly correct with minor issues; meets basic expectations
-    4 - Strong answer demonstrating clear understanding and good communication
-    5 - Excellent answer showing deep knowledge, clear explanation, and technical precision
+    Question (difficulty {difficulty}/5):
+    {question}
 
-    Consider ONLY the technical correctness and completeness relative to the question. Do NOT reward confidence, verbosity, or buzzwords if the content is wrong.
-    If the answer is generic, hand-wavy, off-topic, or fails to address core aspects of the question, it should be scored 1 or 2.
-    Penalize factual errors, misconceptions, and failure to provide key steps, definitions, or rationale.
+    Candidate response:
+    {response}
 
-    Consider:
-    - Technical accuracy and completeness
-    - Clear communication and structured response
-    - Depth of understanding shown
-    - Appropriate use of technical terminology
-    - Problem-solving approach (if applicable)
+    Evaluate the answer by scoring each aspect on a 1–5 scale using the mini-rubrics below.
+    Provide a short note for every aspect that cites concrete evidence (or the lack of it) from the response.
+       - coverage: Does the answer address every part of the question? Penalise omissions or digressions.
+       - technical_depth: Are key PyTorch Lightning APIs, callbacks, or implementation details described accurately? Require code-level insight for ≥4.
+       - evidence: Are there specific examples, metrics, trade-offs, or results? Without real evidence the score must be ≤3.
+       - communication: Is the explanation structured, precise, and does it note limitations or uncertainties?
+       Aspect guide: 1 = incorrect/off-topic, 2 = partial with major gaps, 3 = baseline accurate but light on detail, 4 = strong with concrete steps, 5 = exemplary and exhaustive.
 
-    Provide:
-    1. Score (1-5)
-    2. Brief justification (2-3 sentences) explaining specific correct/incorrect points with reference to the question
+    If the response contains a factual or safety-critical error, set factual_error to true and score every aspect as 1.
+
+    Output strict JSON only (do NOT compute a final score):
+    {{
+        "reasoning": "<2-3 sentence overall justification>",
+        "factual_error": <true | false>,
+        "aspects": {{
+            "coverage": {{"score": <int>, "notes": "<evidence-based note>"}},
+            "technical_depth": {{"score": <int>, "notes": "<note>"}},
+            "evidence": {{"score": <int>, "notes": "<note>"}},
+            "communication": {{"score": <int>, "notes": "<note>"}}
+        }}
+    }}
+
+    Do not include any additional text outside the JSON object.
     """
 )
