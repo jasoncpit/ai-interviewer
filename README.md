@@ -44,6 +44,74 @@ prolific_interview/
 | `load_state` / `save_state` | `src/app/storage/store.py` | Persist and recover session state from Postgres (with an in-memory fallback) so interviews can resume mid-flow. |
 | `ensure_session_id` | `src/app/service/sessions.py` | Guarantee every client exchange has a stable session identifier to tie HTTP calls back to the same state record. |
 
+## Setup
+1. **Dependencies** – Install [uv](https://github.com/astral-sh/uv) and create the Python 3.11 environment with `uv sync`.
+2. **Environment variables** – Provide at least the OpenAI key:
+   ```bash
+   export OPENAI_API_KEY=sk-your-key
+   ```
+   Optional toggles live in `src/app/core/config.py` and can be overridden via env vars (e.g. `stats_prior_mean`, `stats_se_floor`).
+
+### Monitoring with LangSmith
+LangSmith captures end-to-end traces for LangGraph executions, LLM calls, and Streamlit-triggered flows. Enable it by setting:
+
+```bash
+export LANGCHAIN_TRACING_V2=true
+export LANGCHAIN_PROJECT="prolific-ai-interviewer"
+export LANGSMITH_API_KEY=lsm_your_key
+```
+
+With tracing on, every interview run is visible in LangSmith’s UI—use it to diff prompts, inspect node inputs/outputs, or replay entire graphs when debugging.
+
+## Local Development
+- Run API + UI together:
+  ```bash
+  ./scripts/local-test.sh
+  ```
+- API only:
+  ```bash
+  PYTHONPATH=src uv run --python 3.11 uvicorn app.service.service:app --reload
+  ```
+- Streamlit dashboard:
+  ```bash
+  streamlit run src/streamlit_app.py
+  ```
+
+## Architecture at a Glance
+
+### Deployment → FastAPI → Fargate
+```mermaid
+flowchart LR
+    Dev[Developer Laptop] -->|uv sync · pytest| Repo
+    Repo -->|docker build| ECR[(Amazon ECR)]
+    ECR -->|task revision| ECS[ECS Service]
+    ECS -->|launches| Fargate[Fargate Tasks]
+    Fargate -->|serves| FastAPI[FastAPI Interviewer]
+    FastAPI --> Postgres[(Postgres / Aurora)]
+    FastAPI --> LangSmith[(LangSmith Traces)]
+```
+
+### Streamlit Operator Path
+```mermaid
+flowchart LR
+    Operator -->|browser| Streamlit
+    Streamlit -->|SSE / REST| FastAPI
+    FastAPI -->|grade events| Streamlit
+    Streamlit -->|telemetry| LangSmith
+```
+
+### LangGraph Orchestration
+```mermaid
+stateDiagram-v2
+    [*] --> generate
+    generate --> select
+    select --> ask
+    ask --> grade
+    grade --> update
+    update --> select : continue
+    update --> [*] : stop (verified | max_turns | inactive)
+```
+
 ## Bandit Confidence Policies (UCB & LCB)
 - **Upper Confidence Bound (UCB)**: Implemented in `src/app/agents/interviewer/utils/stats.py` via `select_skill_ucb_with_log`. In default “ucb1” mode the agent computes `UCB = mean + C * sqrt(log(t) / n_real)`, where `t` is the total number of graded questions so far and `n_real` is the number for the skill (excluding priors). A “se” mode is also available (`mean + C * se`) when you want exploration tied directly to statistical uncertainty.
 - **Dynamic difficulty**: `select_question_node` in `src/app/agents/interviewer/nodes/select.py` nudges question difficulty up after high scores (≥4) and down after weak answers (≤2), ensuring the UCB policy probes depth appropriately.
@@ -52,9 +120,8 @@ prolific_interview/
 
 ## To do
 
-- [] Setup LangSmith for monitoring and debugging
-- [] Polish notes and notebook for better documentation
-- [] Add more tests for the llm and FastAPI service
-- [] Add architecture diagrams
-- [] Add LangGraph orchestration charts
-- [] A section on UCB and LCB for the selector node
+- [x] Setup LangSmith for monitoring and debugging
+- [x] Polish notes and notebook for better documentation
+- [x] Add architecture diagrams
+- [x] Add LangGraph orchestration charts
+- [x] A section on UCB and LCB for the selector node

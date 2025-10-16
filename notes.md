@@ -46,6 +46,28 @@ So the main theme here is verification, trust, data quality, and scalability sho
 
 Before desigining the overall system architecture, I need to undersatnd an end-to-end flow of how this system would work.
 
+### Monitoring & Debugging (LangSmith)
+
+- Enable tracing with `LANGCHAIN_TRACING_V2=true`, `LANGCHAIN_PROJECT=<run-label>`, and `LANGSMITH_API_KEY`.
+- Capture every LangGraph node invocation; use LangSmith’s compare view to diff prompt revisions and grade outcomes.
+- Tag sessions with the `session_id` header so backend + Streamlit logs align with LangSmith traces.
+- Export failing runs as shared URLs for design reviews or incident post-mortems.
+
+### Deployment & Operator Surface (Recap Diagram)
+
+```mermaid
+flowchart LR
+    Dev[Developer] -->|push| Repo
+    Repo -->|CI build| DockerImage
+    DockerImage --> ECR[(ECR)]
+    ECR --> Fargate[Fargate Service]
+    Fargate --> FastAPI
+    FastAPI -->|SSE| Streamlit
+    Streamlit -->|answers| FastAPI
+    FastAPI -->|telemetry| LangSmith
+```
+
+Streamlit can either run locally during demos or as its own ECS service behind CloudFront. Both paths reuse the same API surface and tracing setup.
 
 Components:
 
@@ -193,3 +215,19 @@ C --> D[Result]
     - I need to create a mechanism to detect inconsistencies in participant answers.
     - How do we balance between asking too many questions and asking too few questions?
     - How do we balance on exploration (exploring new skills) and exploitation (confirming existing skills)?
+
+### Selector Policy Deep Dive (UCB & LCB)
+
+1. **Priors & pseudo-counts**
+   - `stats_prior_mean` (default 3.0) captures “likely competent” before evidence; higher values demand stronger counter-evidence to deactivate a skill.
+   - `stats_prior_strength` and `stats_prior_variance` control how quickly real answers override the prior. Raise the strength for stability; lower it for responsiveness.
+2. **UCB sampling**
+   - `select_skill_ucb_with_log` computes `mean + C * sqrt(log(t)/n_real)` by default. Set `mode="se"` to swap exploration for `C * standard_error`.
+   - Tune `ucb_C` per interview: 1.2 explores more, 0.6 locks onto promising skills sooner.
+3. **LCB verification**
+   - `compute_uncertainty` stores `se`, `lcb`, and `ucb`. Verification requires `real_n >= min_questions_per_skill` *and* `lcb >= verify_lcb`.
+   - Adjust `z_value` to relax or tighten verification. For faster confirmation, drop to 1.28 (≈80 % CI); for conservative runs stick to 1.96 (≈95 %).
+4. **Practical tuning tips**
+   - If verification stalls below 3.5, either lower `verify_lcb`, shrink `z_value`, or bump the prior mean toward 3.2–3.4.
+   - Log `belief_state` snapshots to LangSmith after each `update` to visualise per-skill confidence curves and diagnose stalled verifications.
+   - When coverage matters more than depth, increase `ucb_C` and reduce `min_questions_per_skill` so the agent samples broadly before doubling back.

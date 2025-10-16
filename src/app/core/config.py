@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     # LLM
     openai_model: str = "gpt-4o-mini"
-    openai_temperature: float = 0.4
+    openai_temperature: float = 0.7
     openai_api_key: str | None = None
 
     # Database
@@ -28,7 +28,7 @@ class Settings(BaseSettings):
 
     # Statistics defaults
     stats_prior_mean: float = 3.0
-    stats_prior_variance: float = 1.0
+    stats_prior_variance: float = 0.25
     stats_prior_strength: int = 1
     stats_se_floor: float = 0.1
     stats_se_floor_min_real: int = 1

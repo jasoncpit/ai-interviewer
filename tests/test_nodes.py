@@ -52,12 +52,10 @@ def test_generate_questions_node_seeds_question(monkeypatch):
 def test_grade_node_persists_grade(monkeypatch):
     draft = GradeDraft(
         reasoning="Excellent depth.",
-        aspects={
-            "coverage": AspectBreakdown(score=5, notes="Explained context managers."),
-            "technical_depth": AspectBreakdown(score=5, notes="Detailed __enter__/__exit__."),
-            "evidence": AspectBreakdown(score=5, notes="Mentioned cleanup semantics."),
-            "communication": AspectBreakdown(score=4, notes="Clear and structured."),
-        },
+        coverage=AspectBreakdown(score=5, notes="Explained context managers."),
+        technical_depth=AspectBreakdown(score=5, notes="Detailed __enter__/__exit__."),
+        evidence=AspectBreakdown(score=5, notes="Mentioned cleanup semantics."),
+        communication=AspectBreakdown(score=4, notes="Clear and structured."),
     )
     monkeypatch.setattr("app.core.llm.get_llm", lambda: _StubLLM(draft))
 
@@ -74,6 +72,32 @@ def test_grade_node_persists_grade(monkeypatch):
     assert updated["last_answer"].startswith("They ensure")
     assert updated["pending_answer"] is None
     assert any(entry.startswith("grade → 5") for entry in updated["logs"])
+
+
+def test_grade_node_caps_on_factual_error(monkeypatch):
+    draft = GradeDraft(
+        reasoning="Incorrect claim about context managers.",
+        factual_error=True,
+        coverage=AspectBreakdown(score=4, notes="Addressed the prompt."),
+        technical_depth=AspectBreakdown(score=4, notes="Named __enter__/__exit__."),
+        evidence=AspectBreakdown(score=4, notes="Provided example."),
+        communication=AspectBreakdown(score=4, notes="Clear explanation."),
+    )
+    monkeypatch.setattr("app.core.llm.get_llm", lambda: _StubLLM(draft))
+
+    state = {
+        "current_question": Question(skill="python", text="Explain context managers.", difficulty=3),
+        "pending_answer": "They run __init__ after __enter__.",
+        "last_answer": None,
+        "logs": [],
+    }
+
+    updated = asyncio.run(grade_node(state))
+
+    assert updated["last_grade"].score == 1
+    for detail in updated["last_grade"].aspects.values():
+        assert detail.score == 1
+        assert "override" in detail.notes.lower()
 
 
 def test_select_question_node_prefers_pool(monkeypatch):
