@@ -66,15 +66,7 @@ With tracing on, every interview run is visible in LangSmith’s UI—use it to 
 ## Local Development
 - Run API + UI together:
   ```bash
-  ./scripts/local-test.sh
-  ```
-- API only:
-  ```bash
-  PYTHONPATH=src uv run --python 3.11 uvicorn app.service.service:app --reload
-  ```
-- Streamlit dashboard:
-  ```bash
-  streamlit run src/streamlit_app.py
+  make up
   ```
 
 ## Architecture at a Glance
@@ -99,6 +91,59 @@ flowchart LR
     FastAPI -->|grade events| Streamlit
     Streamlit -->|telemetry| LangSmith
 ```
+
+### High Level System Architecture
+```mermaid
+flowchart TD
+    subgraph 1_Ingestion
+        Uploads[CV / LinkedIn Uploads] --> API[Credential API]
+        API --> S3[S3: Raw Files]
+        API --> SQS[SQS Queue]
+        SQS --> ParserJob[Parser Job<br/>(LLM-based Extraction)]
+        ParserJob --> ProfileDB[(Profile Store: DynamoDB)]
+    end
+
+    subgraph 2_Interviewer
+        ProfileDB --> FastAPI[[AI Interviewer API<br/>LangGraph Workflow]]
+        FastAPI --> Postgres[(Session DB)]
+        FastAPI --> LangSmith[(Tracing / Logs)]
+        Console[Operator Console (Streamlit)] <---> FastAPI
+    end
+
+    subgraph 3_Verification
+        FastAPI --> Verifier[Verifier<br/>(External Sources / Consistency)]
+        Verifier --> ProfileDB
+    end
+
+```
+
+1. Credential Ingestion
+- Candidates upload a CV or LinkedIn profile.
+- Files go to S3 and trigger a Parser Job (via SQS).
+- Parser extracts structured skill data and saves it to DynamoDB.
+
+2. AI Interviewer Core
+
+- FastAPI + LangGraph runs adaptive interview sessions.
+- Each turn updates the candidate’s skill confidence scores.
+- Postgres stores live session state; LangSmith logs each step for debugging and evaluation.
+- Streamlit Console lets an operator monitor or intervene in interviews.
+
+3. Verification Layer
+
+- Runs after each interview session to confirm answer accuracy and consistency.
+- Triggered automatically by FastAPI → sends answers to Verifier service (async or via SQS).
+- Two main verification modes:
+    - External (RAG): retrieves trusted documents or examples to fact-check answers.
+    - Internal: compares multiple answers for the same skill to detect contradictions using NLI model such as roberta-large-mnli, bert-large-mnli, etc. First converts each answer into atomic claims (e.g. "gradient clipping prevents exploding gradients" and "clipping happens after backward pass"). Then compares claim pairs to label relationships (entails / neutral / contradicts). Finally aggregates labels into a per-skill consistency score. This structured approach helps catch subtle contradictions that might be missed in holistic comparison.
+- Scoring: assigns a calibrated confidence score (0–1) and a verdict (✅ verified / ⚠ uncertain / ❌ inconsistent).
+- Outputs stored in Profile DB (DynamoDB) as structured JSON with evidence references.
+
+
+**Design notes**
+- The ingestion plane normalises credentials asynchronously: uploads hit an API, land on SQS, and the parser job (LLM- or rules-based) writes a canonical expertise profile with provenance into an analytical store.
+- The AI Interviewer core pulls those profiles, runs the LangGraph workflow (`generate → select → ask → grade → update → decide`), persists sessions in Postgres, and surfaces the flow through FastAPI/Streamlit with LangSmith tracing for observability.
+- A verification layer optionally cross-checks answers against stored evidence or external fact sources/NLP consistency models, feeding confidence scores and flags back to the interviewer and UI.
 
 ### LangGraph Orchestration
 ```mermaid

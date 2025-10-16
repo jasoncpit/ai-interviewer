@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Dict
+from typing import Dict, Any
 
 from app.agents.interviewer.prompts.grade import GRADE_PROMPT
 from app.agents.interviewer.utils.state import append_log
@@ -55,7 +55,13 @@ async def grade_node(state: InterviewState) -> InterviewState:
     answer = state.get("pending_answer") or ""
 
     llm = llm_module.get_llm()
+    run_config: Dict[str, Any] = {"run_name": "grade_answer"}
+    thread_id = state.get("thread_id")
+    if thread_id:
+        run_config["metadata"] = {"session_id": thread_id, "thread_id": thread_id}
     structured_llm = llm.with_structured_output(GradeDraft)
+    if hasattr(structured_llm, "with_config"):
+        structured_llm = structured_llm.with_config(**run_config)
     draft = await structured_llm.ainvoke(
         GRADE_PROMPT.format(
             skill=question.skill,

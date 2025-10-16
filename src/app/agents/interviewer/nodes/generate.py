@@ -61,7 +61,13 @@ async def generate_questions_node(state: InterviewState) -> InterviewState:
     prev_ans = state.get("last_answer") or ""
     # Import via module to keep patching straightforward in unit tests.
     llm = llm_module.get_llm()
+    run_config: dict[str, Any] = {"run_name": "generate_questions"}
+    thread_id = state.get("thread_id")
+    if thread_id:
+        run_config["metadata"] = {"session_id": thread_id, "thread_id": thread_id}
     structured_llm = llm.with_structured_output(Question)
+    if hasattr(structured_llm, "with_config"):
+        structured_llm = structured_llm.with_config(**run_config)
     questions: List[Question] = []
     for skill in state.get("skills", []):
         evidence = spans_map.get(skill, [])

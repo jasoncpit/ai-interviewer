@@ -29,6 +29,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - skip when deps missing
 class _StubStructuredLLM:
     def __init__(self, model_cls: type[Any]):
         self._model_cls = model_cls
+        self._config = None
 
     async def ainvoke(self, prompt: Any) -> Any:
         text = ""
@@ -43,19 +44,30 @@ class _StubStructuredLLM:
         if self._model_cls is GradeDraft:
             return GradeDraft(
                 reasoning="Stubbed evaluation.",
-                aspects={
-                    "coverage": AspectBreakdown(score=4, notes="Answered main question."),
-                    "technical_depth": AspectBreakdown(score=4, notes="Mentioned key APIs."),
-                    "evidence": AspectBreakdown(score=4, notes="Provided example."),
-                    "communication": AspectBreakdown(score=4, notes="Clear response."),
-                },
+                coverage=AspectBreakdown(score=4, notes="Answered main question."),
+                technical_depth=AspectBreakdown(
+                    score=4, notes="Mentioned key APIs."
+                ),
+                evidence=AspectBreakdown(score=4, notes="Provided example."),
+                communication=AspectBreakdown(score=4, notes="Clear response."),
             )
         return self._model_cls()
 
+    def with_config(self, **kwargs):
+        self._config = kwargs
+        return self
+
 
 class _StubLLM:
+    def __init__(self):
+        self._config = None
+
     def with_structured_output(self, model_cls: type[Any]) -> _StubStructuredLLM:
         return _StubStructuredLLM(model_cls)
+
+    def with_config(self, **kwargs):
+        self._config = kwargs
+        return self
 
     async def ainvoke(self, prompt: Any) -> Any:
         return type("StubMessage", (), {"content": "stubbed"})()

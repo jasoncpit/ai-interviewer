@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, AsyncGenerator, Dict
+from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -60,10 +61,12 @@ def _load_or_init_state(
 ) -> InterviewState:
     """Reuse an existing interview state or bootstrap a brand new ledger."""
     if session_id and (existing := load_state(session_id)):
+        existing.setdefault("thread_id", session_id)
         existing.setdefault("skill_summaries", summarise_skills(existing))
         return existing
     skills = derive_skills_from_profile(request.profile)
     spans_map = build_spans_map_from_profile(request.profile)
+    thread_id = session_id or f"thread-{uuid4()}"
     state = build_state(
         skills,
         request.max_turns,
@@ -72,6 +75,7 @@ def _load_or_init_state(
         request.z_value,
         request.ucb_C,
         spans_map,
+        thread_id=thread_id,
     )
     state["skill_summaries"] = summarise_skills(state)
     return state
@@ -139,6 +143,7 @@ async def stream(
                     ),
                     "turn": state.get("turn", 0),
                     "logs": state.get("logs", [])[-10:],
+                    "thread_id": state.get("thread_id"),
                 },
             )
             return
@@ -161,7 +166,13 @@ async def stream(
             yield b": keep-alive\n\n"
             yield _encode_event("interrupt", {"schema": {"answer": "string"}})
             _persist_state(session_id, state)
-            yield _encode_event("done", {"status": "awaiting_answer"})
+            yield _encode_event(
+                "done",
+                {
+                    "status": "awaiting_answer",
+                    "thread_id": state.get("thread_id"),
+                },
+            )
             return
 
         # Otherwise, start a new selection
@@ -181,7 +192,10 @@ async def stream(
         yield b": keep-alive\n\n"
         yield _encode_event("interrupt", {"schema": {"answer": "string"}})
         _persist_state(session_id, state)
-        yield _encode_event("done", {"status": "awaiting_answer"})
+        yield _encode_event(
+            "done",
+            {"status": "awaiting_answer", "thread_id": state.get("thread_id")},
+        )
 
     return StreamingResponse(
         event_gen(),
@@ -210,6 +224,7 @@ async def resume(
         state = load_state(session_id)
         if not state:
             raise HTTPException(status_code=404, detail="session not found")
+        state.setdefault("thread_id", session_id)
 
         if state.get("current_question") is None:
             raise HTTPException(
@@ -248,6 +263,7 @@ async def resume(
                     "skill_summaries", summarise_skills(state)
                 ),
                 "logs": state.get("logs", [])[-50:],
+                "thread_id": state.get("thread_id"),
             },
         )
 
@@ -274,7 +290,7 @@ async def resume(
             state = ask_node(state)
             yield b": keep-alive\n\n"
             yield _encode_event("interrupt", {"schema": {"answer": "string"}})
-            done_payload = {"status": "awaiting_answer"}
+            done_payload = {"status": "awaiting_answer", "thread_id": state.get("thread_id")}
         else:
             done_payload = {
                 "verified": state.get("verified_skills", []),
@@ -284,6 +300,7 @@ async def resume(
                 ),
                 "turn": state.get("turn", 0),
                 "logs": state.get("logs", [])[-50:],
+                "thread_id": state.get("thread_id"),
             }
 
         _persist_state(session_id, state)
@@ -310,6 +327,7 @@ DEFAULT_SIM_PERSONA = (
 async def simulation_answer(
     request: SimulateAnswerRequest,
     x_api_key: str | None = Header(default=None),
+    session_id: str | None = Header(default=None),
 ) -> SimulateAnswerResponse:
     """Generate a mock candidate answer using the backend's LLM."""
 
@@ -332,6 +350,11 @@ async def simulation_answer(
     prompt = "\n".join(prompt_parts)
 
     llm = get_llm(temperature=0.4)
+    run_config: Dict[str, Any] = {"run_name": "simulate_answer"}
+    if session_id:
+        run_config["metadata"] = {"session_id": session_id, "thread_id": session_id}
+    if hasattr(llm, "with_config"):
+        llm = llm.with_config(**run_config)
     try:
         message = await llm.ainvoke(prompt)
         answer = getattr(message, "content", str(message)).strip()

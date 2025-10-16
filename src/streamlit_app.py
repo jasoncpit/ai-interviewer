@@ -461,6 +461,7 @@ if st.session_state.get("awaiting_answer"):
         client = AgentClient(base_url=base_url)
         payload = {**resume_payload_base, "answer": answer}
         session_id = st.session_state.get("session_id") or f"session-{uuid.uuid4()}"
+        st.session_state["session_id"] = session_id
         try:
             for evt in client.resume(payload, session_id=session_id):
                 signal = handle_stream_event(evt.get("event"), evt.get("data"))
@@ -475,6 +476,8 @@ if st.session_state.get("awaiting_answer"):
         question = st.session_state.get("current_question") or {}
         try:
             client = AgentClient(base_url=base_url)
+            session_id = st.session_state.get("session_id") or f"session-{uuid.uuid4()}"
+            st.session_state["session_id"] = session_id
             sim = client.simulate_answer(
                 {
                     "question": question.get("text", ""),
@@ -484,7 +487,8 @@ if st.session_state.get("awaiting_answer"):
                         f"{m['role']}: {m['content']}"
                         for m in st.session_state.get("chat", [])[-6:]
                     ],
-                }
+                },
+                session_id=session_id,
             )
             sim_answer = sim.get("answer", "").strip()
         except Exception as exc:
@@ -495,6 +499,7 @@ if st.session_state.get("awaiting_answer"):
             client = AgentClient(base_url=base_url)
             payload = {**resume_payload_base, "answer": sim_answer}
             session_id = st.session_state.get("session_id") or f"session-{uuid.uuid4()}"
+            st.session_state["session_id"] = session_id
             try:
                 for evt in client.resume(payload, session_id=session_id):
                     signal = handle_stream_event(evt.get("event"), evt.get("data"))

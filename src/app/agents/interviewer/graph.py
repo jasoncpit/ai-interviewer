@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Sequence
+from uuid import uuid4
 
 from langgraph.graph import START, StateGraph
 from langgraph.types import Command
@@ -34,7 +35,10 @@ def build_state(
     z_value: float,
     ucb_C: float,
     spans_map: Dict[str, List[str]],
+    *,
+    thread_id: str | None = None,
 ) -> InterviewState:
+    tid = thread_id or f"thread-{uuid4()}"
     state: InterviewState = {
         "skills": skills,
         "belief_state": _initial_belief(skills, z_value),
@@ -43,6 +47,7 @@ def build_state(
         "last_grade": None,
         "last_answer": None,  # type: ignore[typeddict-item]
         "pending_answer": None,  # type: ignore[typeddict-item]
+        "thread_id": tid,
         "spans_map": spans_map,
         "turn": 0,
         "max_turns": max_turns,
@@ -58,7 +63,7 @@ def build_state(
     }
     append_log(
         state,
-        f"init → skills={skills}, max_turns={max_turns}, threshold={verify_lcb}, z={z_value}, C={ucb_C}",
+        f"init → thread={tid} skills={skills}, max_turns={max_turns}, threshold={verify_lcb}, z={z_value}, C={ucb_C}",
     )
     state["skill_summaries"] = summarise_skills(state)
     return state  # type: ignore[return-value]

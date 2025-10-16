@@ -100,7 +100,13 @@ async def select_question_node(state: InterviewState) -> InterviewState:
     if candidate is None:
         source = "llm"
         llm = llm_module.get_llm()
+        run_config: dict[str, Any] = {"run_name": "select_question"}
+        thread_id = state.get("thread_id")
+        if thread_id:
+            run_config["metadata"] = {"session_id": thread_id, "thread_id": thread_id}
         structured_llm = llm.with_structured_output(Question)
+        if hasattr(structured_llm, "with_config"):
+            structured_llm = structured_llm.with_config(**run_config)
         evidence = "\n".join(state.get("spans_map", {}).get(skill, []))
         prev_q = (
             getattr(state.get("current_question"), "text", "")

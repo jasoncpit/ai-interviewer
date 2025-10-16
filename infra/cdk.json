@@ -1,6 +1,0 @@
-{
-  "app": "python -m app.app",
-  "context": {
-    "@aws-cdk/core:newStyleStackSynthesis": true
-  }
-}

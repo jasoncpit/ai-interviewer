@@ -12,17 +12,27 @@ from app.schema.models import AspectBreakdown, Grade, GradeDraft, Question
 class _StubStructuredLLM:
     def __init__(self, result):
         self._result = result
+        self._config = None
 
     async def ainvoke(self, prompt):
         return self._result
+
+    def with_config(self, **kwargs):
+        self._config = kwargs
+        return self
 
 
 class _StubLLM:
     def __init__(self, result):
         self._result = result
+        self._config = None
 
     def with_structured_output(self, model_cls):
         return _StubStructuredLLM(self._result)
+
+    def with_config(self, **kwargs):
+        self._config = kwargs
+        return self
 
 
 def test_generate_questions_node_seeds_question(monkeypatch):
@@ -38,6 +48,7 @@ def test_generate_questions_node_seeds_question(monkeypatch):
         "spans_map": {"python": ["Built ETL in Python."]},
         "question_history": [],
         "logs": [],
+        "thread_id": "thread-test",
     }
 
     updated = asyncio.run(generate_questions_node(state))
@@ -64,6 +75,7 @@ def test_grade_node_persists_grade(monkeypatch):
         "pending_answer": "They ensure deterministic cleanup via __enter__/__exit__.",
         "last_answer": None,
         "logs": [],
+        "thread_id": "thread-test",
     }
 
     updated = asyncio.run(grade_node(state))
@@ -90,6 +102,7 @@ def test_grade_node_caps_on_factual_error(monkeypatch):
         "pending_answer": "They run __init__ after __enter__.",
         "last_answer": None,
         "logs": [],
+        "thread_id": "thread-test",
     }
 
     updated = asyncio.run(grade_node(state))
@@ -119,6 +132,7 @@ def test_select_question_node_prefers_pool(monkeypatch):
         "current_question": None,
         "last_answer": "",
         "turn": 0,
+        "thread_id": "thread-test",
     }
 
     updated = asyncio.run(select_question_node(state))
@@ -149,6 +163,7 @@ def test_select_question_node_calls_llm_when_pool_empty(monkeypatch):
         "current_question": None,
         "last_answer": "",
         "turn": 0,
+        "thread_id": "thread-test",
     }
 
     updated = asyncio.run(select_question_node(state))

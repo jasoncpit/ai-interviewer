@@ -49,6 +49,7 @@ class InterviewState(TypedDict):
     last_grade: Optional[Grade]
     last_answer: Optional[str]
     pending_answer: Optional[str]
+    thread_id: str
     spans_map: Dict[str, List[str]]
     turn: int
     max_turns: int
