@@ -146,24 +146,40 @@ flowchart LR
 ### High Level System Architecture
 ```mermaid
 flowchart TD
-    subgraph Ingestion
-        Uploads[CV / LinkedIn Uploads] -->|API call| API[Credential API]
-        API -->|store| S3[(Raw Files)]
-        API -->|enqueue| SQS[[SQS Queue]]
-        SQS -->|process| ParserJob[Parser Job - LLM-based Extraction]
-        ParserJob -->|save| ProfileDB[(Profile Store: DynamoDB)]
+    %% ========== INGESTION ==========
+    subgraph Ingestion["Ingestion"]
+        Uploads[CV /  LinkedIn export] --> API[Credential API]
+        API -->|store raw| S3[(S3: Raw Files)]
+        API -->|enqueue| IngestQ[[SQS: Ingestion Queue]]
+        IngestQ --> ParserJob[LLM Parser: skill & evidence extract]
+        ParserJob --> ProfileDB[(DynamoDB: Profile Store)]
+        IngestQ -.-> IngestDLQ[(DLQ)]
     end
 
-    subgraph Interviewer
-        ProfileDB -->|query| FastAPI[[AI Interviewer API / LangGraph Workflow]]
-        FastAPI -->|store| Postgres[(Session DB)]
-        FastAPI -->|log| LangSmith(Tracing / Logs)
-        Console[Operator Console - Streamlit] <-->|interface| FastAPI
+    %% ========== INTERVIEWER ==========
+    subgraph Interviewer["AI Interviewer"]
+        ProfileDB -->|skill priors| FastAPI[[FastAPI + LangGraph]]
+        FastAPI --> Postgres[Postgres: Session DB]
+        FastAPI --> LangSmith[LangSmith Traces]
+        Console[Streamlit Operator Console] <-->|REST/SSE| FastAPI
+
+        %% grading vs verification separation
+        FastAPI --> Grader[LLM Grader rubric JSON]
+        Grader -->|graded_answer| VerifQ[[SQS: Verification Queue]]
     end
 
-    subgraph Verification
-        FastAPI -->|call| Verifier[Verifier - External Sources / Consistency]
-        Verifier -->|update| ProfileDB
+    %% ========== VERIFICATION ==========
+    subgraph Verification["Verification & Trust"]
+        VerifQ --> Verifier[Verifier Orchestrator]
+        Verifier --> Claims[Claim Extractor]
+        Verifier --> NLI[NLI Consistency Check]
+        Verifier --> RAG[RAG Fact Checker]
+        RAG --> Corpus[(Knowledge Store: curated docs/code)]
+        NLI --> Verifier
+        Claims --> Verifier
+        Verifier --> Calibrator[Score Aggregation & Thresholds]
+        Calibrator -->|write result| ProfileDB
+        VerifQ -.-> VerifDLQ[(DLQ)]
     end
 ```
 

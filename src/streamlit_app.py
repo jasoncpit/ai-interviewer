@@ -177,7 +177,7 @@ with st.sidebar:
         "Verify LCB",
         min_value=0.0,
         max_value=5.0,
-        value=3.75,
+        value=3.5,
         step=0.05,
         help="Lower confidence bound threshold to mark a skill as verified. Higher = stricter.",
     )
@@ -193,7 +193,7 @@ with st.sidebar:
         "UCB C",
         min_value=0.0,
         max_value=5.0,
-        value=2.0,
+        value=3.0,
         step=0.1,
         help="Exploration coefficient for UCB selection (higher explores more).",
     )
