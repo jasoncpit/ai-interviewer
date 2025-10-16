@@ -2,6 +2,53 @@
 
 LangGraph-powered interviewing assistant that verifies a candidate’s claimed skills by asking adaptive questions, grading answers with an LLM, and tracking Bayesian confidence scores in real time. The stack bundles a FastAPI service, a Streamlit operator console, and persistence helpers so interviews can pause, resume, and surface audit trails.
 
+
+## Background
+
+The AI interviewer pipleine is quite complex, but let's me take a step back and think what the company is asking for at its core, ground this in a simpler business context:
+
+-Why it matters: The company’s value depends on a trusted pool of verified participants for AI evaluation. If we can’t trust their claimed skills, every downstream dataset and model evaluation becomes unreliable.
+
+- The problem: Participants self-report expertise (“Python expert,” “data scientist,” etc.), but manual vetting doesn’t scale and is prone to bias. We need a systematic, scalable way to algorithmically verify human expertise—accurately, quickly, and at low cost.
+
+- The core question: How can we quantify how much a person actually knows — without a labelled dataset or prolonged human supervision within a limited time. If we are desigining an AI interviewer, we don't have the time to grill the candidate for 30 minutes, this could lead to a bad user experience and the candidate may not be willing to participate.
+
+At its heart, this is a Bayesian evidence-gathering problem under uncertainty and cost constraints.
+
+We’re dealing with:
+
+- Epistemic uncertainty: How sure are we about this person’s expertise given limited evidence?
+- Signal extraction: How do we detect competence in unstructured, natural-language responses rather than multiple-choice tests?
+- Cost efficiency: How can we reach high confidence in 5–10 turns instead of 30, minimizing API cost and participant fatigue?
+- Robustness: How do we resist overclaiming and bluffing, especially when verbal fluency can mimic expertise?
+- Scalability: How do we make this process modular, auditable, and repeatable across thousands of interviews daily?
+
+
+### My proposition
+The key challenge is turning unstructured dialogue into structured, evidence-based confidence estimates — efficiently and adaptively.
+
+My prototype demonstrates a LangGraph-powered conversation flow manager that behaves like a multi-armed bandit under epistemic uncertainty.
+Each “arm” represents a skill or subskill. Each question-answer exchange provides a noisy observation of true expertise. The system must decide:
+
+- Which skill should I probe next?
+- When do I have enough evidence to stop?
+
+The interviewer continuously updates its belief state using Welford statistics (running mean and variance) and computes a Lower Confidence Bound (LCB) per skill. When the LCB exceeds a verification threshold, the skill is marked verified.
+
+This setup naturally encodes the exploration–exploitation tradeoff:
+
+- Exploration: Try new questions to reduce uncertainty on less-tested skills.
+- Exploitation: Focus on the most promising skills to verify quickly.
+- Stopping criterion: When all skills are either verified or deemed unlikely, terminate the interview—minimizing wasted turns and cost.
+
+### Why It Matters
+
+- Information efficiency: The system maximizes information gain per question, making each LLM call count.
+- Human trust at scale: Converts soft, conversational evidence into quantifiable confidence — a foundation for large-scale participant verification.
+- Auditable and adaptive: Every step (question, grade, confidence update) is logged, replayable, and explainable through LangSmith traces.
+- Generalizable: The same architecture can verify any domain expertise — from Python to medicine — with only prompt-layer adjustments.
+
+
 ## Project Description
 - **Goal**: Confirm whether a candidate is genuinely proficient in the skills they declare by iterating on questions until the model is confident.
 - **Agent loop**: `generate → select → ask → grade → update → decide` orchestrated by LangGraph (`src/app/agents/interviewer/graph.py`). Each node focuses on one concern and writes back to a shared `InterviewState`.
@@ -71,17 +118,6 @@ With tracing on, every interview run is visible in LangSmith’s UI—use it to 
 
 ## Architecture at a Glance
 
-### Deployment → FastAPI → Fargate
-```mermaid
-flowchart LR
-    Dev[Developer Laptop] -->|uv sync · pytest| Repo
-    Repo -->|docker build| ECR[(Amazon ECR)]
-    ECR -->|task revision| ECS[ECS Service]
-    ECS -->|launches| Fargate[Fargate Tasks]
-    Fargate -->|serves| FastAPI[FastAPI Interviewer]
-    FastAPI --> Postgres[(Postgres / Aurora)]
-    FastAPI --> LangSmith[(LangSmith Traces)]
-```
 
 ### Streamlit Operator Path
 ```mermaid
@@ -132,12 +168,14 @@ flowchart TD
 3. Verification Layer
 
 - Runs after each interview session to confirm answer accuracy and consistency.
-- Triggered automatically by FastAPI → sends answers to Verifier service (async or via SQS).
+- Triggered automatically by FastAPI, which sends answers to the Verifier service (async or via SQS).
 - Two main verification modes:
     - External (RAG): retrieves trusted documents or examples to fact-check answers.
-    - Internal: compares multiple answers for the same skill to detect contradictions using NLI model such as roberta-large-mnli, bert-large-mnli, etc. First converts each answer into atomic claims (e.g. "gradient clipping prevents exploding gradients" and "clipping happens after backward pass"). Then compares claim pairs to label relationships (entails / neutral / contradicts). Finally aggregates labels into a per-skill consistency score. This structured approach helps catch subtle contradictions that might be missed in holistic comparison.
-- Scoring: assigns a calibrated confidence score (0–1) and a verdict (✅ verified / ⚠ uncertain / ❌ inconsistent).
-- Outputs stored in Profile DB (DynamoDB) as structured JSON with evidence references.
+    - Internal (NLI): compares multiple answers for the same skill to detect contradictions using models such as roberta-large-mnli or deberta-v3-large-mnli.
+        - Each answer is decomposed into atomic claims (e.g., "gradient clipping prevents exploding gradients").
+        - Claim pairs are compared for entailment, neutrality, or contradiction, and aggregated into a per-skill consistency score.
+- Scoring: assigns a calibrated confidence score (0–1) and verdict (✅ verified / ⚠ uncertain / ❌ inconsistent).
+- Storage: results are written back to the Profile DB (DynamoDB) as structured JSON with evidence references.
 
 
 **Design notes**
@@ -157,16 +195,21 @@ stateDiagram-v2
     update --> [*] : stop (verified | max_turns | inactive)
 ```
 
+### Deployment → FastAPI → Fargate
+```mermaid
+flowchart LR
+    Dev[Developer Laptop] -->|uv sync · pytest| Repo
+    Repo -->|docker build| ECR[(Amazon ECR)]
+    ECR -->|task revision| ECS[ECS Service]
+    ECS -->|launches| Fargate[Fargate Tasks]
+    Fargate -->|serves| FastAPI[FastAPI Interviewer]
+    FastAPI --> Postgres[(Postgres / Aurora)]
+    FastAPI --> LangSmith[(LangSmith Traces)]
+```
+
+
 ## Bandit Confidence Policies (UCB & LCB)
 - **Upper Confidence Bound (UCB)**: Implemented in `src/app/agents/interviewer/utils/stats.py` via `select_skill_ucb_with_log`. In default “ucb1” mode the agent computes `UCB = mean + C * sqrt(log(t) / n_real)`, where `t` is the total number of graded questions so far and `n_real` is the number for the skill (excluding priors). A “se” mode is also available (`mean + C * se`) when you want exploration tied directly to statistical uncertainty.
 - **Dynamic difficulty**: `select_question_node` in `src/app/agents/interviewer/nodes/select.py` nudges question difficulty up after high scores (≥4) and down after weak answers (≤2), ensuring the UCB policy probes depth appropriately.
 - **Lower Confidence Bound (LCB)**: `compute_uncertainty` in `src/app/agents/interviewer/utils/stats.py` combines the running mean and variance to produce `LCB = mean - z * standard_error`. The z-score comes from the request payload so the service can tune strictness per interview, and a prior pseudo-count keeps early confidence intervals honest.
 - **Verification rule**: `update_node` in `src/app/agents/interviewer/nodes/update.py` declares a skill verified only when two conditions hold: the agent has asked at least `min_questions_per_skill` and the computed LCB clears the `verification_threshold`. Failing scores push the skill into an inactive pool so UCB stops sampling it, prompting `decide_node` to wrap up if no active skills remain.
-
-## To do
-
-- [x] Setup LangSmith for monitoring and debugging
-- [x] Polish notes and notebook for better documentation
-- [x] Add architecture diagrams
-- [x] Add LangGraph orchestration charts
-- [x] A section on UCB and LCB for the selector node
