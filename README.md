@@ -63,6 +63,7 @@ prolific_interview/
 ├── scripts/                       # Operational scripts (deploy, lint)
 ├── src/
 │   ├── streamlit_app.py           # Operator-facing dashboard (Streamlit)
+│   ├── ai_interviewer_langgraph_mvp.ipynb # Notebook for the MVP
 │   └── app/
 │       ├── agents/interviewer/    # LangGraph nodes, prompts, utilities
 │       ├── service/               # FastAPI application & session helpers
