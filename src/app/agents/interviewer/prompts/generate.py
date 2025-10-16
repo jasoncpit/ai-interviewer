@@ -2,7 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 QUESTION_PROMPT = ChatPromptTemplate.from_template(
     """
-    You are designing a technical interview question to assess {skill}.
+    You are having a friendly technical conversation to learn about the candidate's experience with {skill}.
 
     Difficulty: {difficulty} on a 1-5 scale (1=easy, 5=expert).
     Previous question: {previous_question}
@@ -14,11 +14,11 @@ QUESTION_PROMPT = ChatPromptTemplate.from_template(
     Evidence from candidate profile:
     {evidence_spans}
 
-    Based on the candidate's previous answer and reasoning, ask a natural follow-up question that builds on their response.
-    The question should feel like a friendly conversation while still probing their practical expertise in {skill}.
-    Keep it concise and focused - it should be answerable in under 2 minutes.
+    Continue the conversation naturally by asking a follow-up question that builds on their response. Make them feel comfortable while exploring their practical expertise in {skill}. Keep the tone warm and collaborative.
 
-    If there is no previous question/answer, ask an initial question that matches their apparent skill level.
+    The question should be concise and focused - something they can answer comfortably in under 2 minutes.
+
+    If this is the first question, start with a welcoming question that matches their apparent skill level.
 
     Return only the question text.
     """

@@ -16,19 +16,20 @@ class AspectBreakdown(BaseModel):
     notes: str = Field(default="", description="Short justification for the aspect score.")
 
 
+def _default_aspect_breakdown() -> "AspectBreakdown":
+    return AspectBreakdown(score=1, notes="")
+
+
 class GradeDraft(BaseModel):
-    reasoning: str = Field(
-        default="",
-        description="Overall justification that highlights strengths and weaknesses.",
-    )
-    aspects: Dict[str, AspectBreakdown] = Field(
-        default_factory=dict,
-        description="Per-aspect scores and notes prior to final aggregation.",
-    )
+    reasoning: str = Field(default="", description="Overall justification.")
     factual_error: bool = Field(
         default=False,
         description="True when the response contains a factual or safety-critical error.",
     )
+    coverage: AspectBreakdown = Field(default_factory=_default_aspect_breakdown)
+    technical_depth: AspectBreakdown = Field(default_factory=_default_aspect_breakdown)
+    evidence: AspectBreakdown = Field(default_factory=_default_aspect_breakdown)
+    communication: AspectBreakdown = Field(default_factory=_default_aspect_breakdown)
 
 
 class Grade(BaseModel):

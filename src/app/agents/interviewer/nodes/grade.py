@@ -39,7 +39,10 @@ def _compute_final_score(
     final_score = _round_half_up(weighted_average)
     final_score = max(1, min(5, final_score))
 
-    if any(aspects[aspect].score <= 2 for aspect in _ASPECTS_ORDER):
+    if any(
+        aspects.get(aspect, AspectBreakdown(score=1, notes="")).score <= 2
+        for aspect in _ASPECTS_ORDER
+    ):
         final_score = min(final_score, 2)
 
     return final_score
@@ -62,12 +65,12 @@ async def grade_node(state: InterviewState) -> InterviewState:
         )
     )
 
-    aspect_map: Dict[str, AspectBreakdown] = dict(draft.aspects)
-    for aspect in _ASPECTS_ORDER:
-        if aspect not in aspect_map:
-            aspect_map[aspect] = AspectBreakdown(
-                score=1, notes="Aspect not provided; defaulted to 1."
-            )
+    aspect_map: Dict[str, AspectBreakdown] = {
+        "coverage": draft.coverage,
+        "technical_depth": draft.technical_depth,
+        "evidence": draft.evidence,
+        "communication": draft.communication,
+    }
 
     if draft.factual_error:
         for name, detail in list(aspect_map.items()):

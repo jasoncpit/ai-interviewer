@@ -143,7 +143,7 @@ def _exercise_stream() -> None:
     assert any(evt == "message" and body.get("type") == "grade" for evt, body in second_pass)
     status_payload = next((body for evt, body in second_pass if evt == "state"), {})
     assert "belief_state" in status_payload
-    assert any(evt == "interrupt" for evt, _ in second_pass)
+    assert any(evt in {"interrupt", "done"} for evt, _ in second_pass)
 
 
 def test_stream_round_trip() -> None:

@@ -24,12 +24,10 @@ GRADE_PROMPT = ChatPromptTemplate.from_template(
     {{
         "reasoning": "<2-3 sentence overall justification>",
         "factual_error": <true | false>,
-        "aspects": {{
-            "coverage": {{"score": <int>, "notes": "<evidence-based note>"}},
-            "technical_depth": {{"score": <int>, "notes": "<note>"}},
-            "evidence": {{"score": <int>, "notes": "<note>"}},
-            "communication": {{"score": <int>, "notes": "<note>"}}
-        }}
+        "coverage": {{"score": <int>, "notes": "<coverage note>"}},
+        "technical_depth": {{"score": <int>, "notes": "<depth note>"}},
+        "evidence": {{"score": <int>, "notes": "<evidence note>"}},
+        "communication": {{"score": <int>, "notes": "<communication note>"}}
     }}
 
     Do not include any additional text outside the JSON object.
