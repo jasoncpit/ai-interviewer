@@ -41,7 +41,14 @@ def handle_stream_event(event: str, data: str, log=None) -> Optional[str]:
                 {"role": "assistant", "content": payload.get("text")}
             )
         elif payload.get("type") == "grade":
-            text = f"Grade: {payload.get('score')} — {payload.get('reason', '')}"
+            aspects = payload.get("aspects") or {}
+            aspect_bits = ", ".join(
+                f"{name}: {details.get('score')}"
+                for name, details in aspects.items()
+                if isinstance(details, dict) and "score" in details
+            )
+            detail_suffix = f" | {aspect_bits}" if aspect_bits else ""
+            text = f"Grade: {payload.get('score')} — {payload.get('reason', '')}{detail_suffix}"
             st.session_state["chat"].append({"role": "assistant", "content": text})
         return None
 

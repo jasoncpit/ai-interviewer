@@ -65,6 +65,11 @@ def update_latest_history_entry(
     if grade is not None:
         entry["score"] = grade.score
         entry["reasoning"] = grade.reasoning
+        if getattr(grade, "aspects", None):
+            entry["aspects"] = {
+                name: {"score": detail.score, "notes": detail.notes}
+                for name, detail in grade.aspects.items()
+            }
 
 
 def history_snippet(state: InterviewState, skill: str, limit: int = 3) -> str:

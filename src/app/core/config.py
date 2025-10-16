@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     # CORS / UI
     cors_origins: str = "http://localhost:8501,http://127.0.0.1:8501"
 
+    # Statistics defaults
+    stats_prior_mean: float = 3.0
+    stats_prior_variance: float = 1.0
+    stats_prior_strength: int = 1
+    stats_se_floor: float = 0.1
+    stats_se_floor_min_real: int = 1
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

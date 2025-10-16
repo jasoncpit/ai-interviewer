@@ -20,7 +20,7 @@ for path in (SRC_ROOT, REPO_ROOT):
         sys.path.append(path_str)
 
 try:  # pragma: no cover - optional dependency guard
-    from app.schema.models import Grade, Question  # noqa: E402
+    from app.schema.models import AspectBreakdown, Grade, GradeDraft, Question  # noqa: E402
     from app.service.service import app  # noqa: E402
 except ModuleNotFoundError as exc:  # pragma: no cover - skip when deps missing
     pytest.skip(f"backend dependencies not available: {exc}", allow_module_level=True)
@@ -40,8 +40,16 @@ class _StubStructuredLLM:
         if self._model_cls is Question:
             skill = _extract_skill(text) or "unknown"
             return Question(skill=skill, text=f"Tell me about {skill}.", difficulty=3)
-        if self._model_cls is Grade:
-            return Grade(score=4, reasoning="Stubbed evaluation.")
+        if self._model_cls is GradeDraft:
+            return GradeDraft(
+                reasoning="Stubbed evaluation.",
+                aspects={
+                    "coverage": AspectBreakdown(score=4, notes="Answered main question."),
+                    "technical_depth": AspectBreakdown(score=4, notes="Mentioned key APIs."),
+                    "evidence": AspectBreakdown(score=4, notes="Provided example."),
+                    "communication": AspectBreakdown(score=4, notes="Clear response."),
+                },
+            )
         return self._model_cls()
 
 

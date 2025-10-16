@@ -231,6 +231,10 @@ async def resume(
                 "type": "grade",
                 "score": grade.score,
                 "reason": grade.reasoning,
+                "aspects": {
+                    name: {"score": detail.score, "notes": detail.notes}
+                    for name, detail in grade.aspects.items()
+                },
             },
         )
 

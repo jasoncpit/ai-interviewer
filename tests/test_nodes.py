@@ -6,7 +6,7 @@ from app.agents.interviewer.nodes.generate import generate_questions_node
 from app.agents.interviewer.nodes.grade import grade_node
 from app.agents.interviewer.nodes.select import select_question_node
 from app.agents.interviewer.utils.stats import ensure_prior
-from app.schema.models import Grade, Question
+from app.schema.models import AspectBreakdown, Grade, GradeDraft, Question
 
 
 class _StubStructuredLLM:
@@ -50,8 +50,16 @@ def test_generate_questions_node_seeds_question(monkeypatch):
 
 
 def test_grade_node_persists_grade(monkeypatch):
-    grade = Grade(score=5, reasoning="Excellent depth.")
-    monkeypatch.setattr("app.core.llm.get_llm", lambda: _StubLLM(grade))
+    draft = GradeDraft(
+        reasoning="Excellent depth.",
+        aspects={
+            "coverage": AspectBreakdown(score=5, notes="Explained context managers."),
+            "technical_depth": AspectBreakdown(score=5, notes="Detailed __enter__/__exit__."),
+            "evidence": AspectBreakdown(score=5, notes="Mentioned cleanup semantics."),
+            "communication": AspectBreakdown(score=4, notes="Clear and structured."),
+        },
+    )
+    monkeypatch.setattr("app.core.llm.get_llm", lambda: _StubLLM(draft))
 
     state = {
         "current_question": Question(skill="python", text="Explain context managers.", difficulty=3),
@@ -65,7 +73,7 @@ def test_grade_node_persists_grade(monkeypatch):
     assert updated["last_grade"].score == 5
     assert updated["last_answer"].startswith("They ensure")
     assert updated["pending_answer"] is None
-    assert updated["logs"][-1].startswith("grade → 5")
+    assert any(entry.startswith("grade → 5") for entry in updated["logs"])
 
 
 def test_select_question_node_prefers_pool(monkeypatch):
